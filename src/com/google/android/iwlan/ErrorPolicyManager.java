@@ -295,8 +295,7 @@ public class ErrorPolicyManager {
                 int protocolErrorType = ((IkeProtocolException) exception).getErrorType();
                 switch (protocolErrorType) {
                     case IkeProtocolException.ERROR_TYPE_AUTHENTICATION_FAILED:
-                        // TODO: Change this as per b/175719031
-                        ret = DataFailCause.USER_AUTHENTICATION;
+                        ret = DataFailCause.IWLAN_IKEV2_AUTH_FAILURE;
                         break;
                     case IKE_PROTOCOL_ERROR_PDN_CONNECTION_REJECTION:
                         ret = DataFailCause.IWLAN_PDN_CONNECTION_REJECTION;
@@ -486,13 +485,13 @@ public class ErrorPolicyManager {
         for (int i = 0; i < apnArray.length(); i++) {
             JSONObject apnDetails = apnArray.getJSONObject(i);
 
-            String apnName = (String) apnDetails.get("ApnName");
+            String apnName = ((String) apnDetails.get("ApnName")).trim();
             JSONArray errorTypeArray = (JSONArray) apnDetails.get("ErrorTypes");
 
             for (int j = 0; j < errorTypeArray.length(); j++) {
                 JSONObject errorTypeObject = errorTypeArray.getJSONObject(j);
 
-                String errorTypeStr = (String) errorTypeObject.get("ErrorType");
+                String errorTypeStr = ((String) errorTypeObject.get("ErrorType")).trim();
                 JSONArray errorDetailArray = (JSONArray) errorTypeObject.get("ErrorDetails");
                 int errorType = UNKNOWN_ERROR_TYPE;
 
@@ -519,7 +518,7 @@ public class ErrorPolicyManager {
             throws JSONException, IllegalArgumentException {
         List<Integer> ret = new ArrayList<>();
         for (int i = 0; i < retryArray.length(); i++) {
-            String retryTime = retryArray.getString(i);
+            String retryTime = retryArray.getString(i).trim();
 
             // catch misplaced -1 retry times in the array.
             // 1. if it is not placed at the last position in the array
@@ -554,7 +553,8 @@ public class ErrorPolicyManager {
             throws JSONException, IllegalArgumentException {
         List<Integer> ret = new ArrayList<>();
         for (int i = 0; i < unthrottlingEvents.length(); i++) {
-            int event = IwlanEventListener.getUnthrottlingEvent(unthrottlingEvents.getString(i));
+            int event =
+              IwlanEventListener.getUnthrottlingEvent(unthrottlingEvents.getString(i).trim());
             if (event == IwlanEventListener.UNKNOWN_EVENT) {
                 throw new IllegalArgumentException(
                         "Unexpected unthrottlingEvent " + unthrottlingEvents.getString(i));
@@ -570,7 +570,7 @@ public class ErrorPolicyManager {
         boolean isValidErrorDetail = true;
 
         for (int i = 0; i < errorDetailArray.length(); i++) {
-            String errorDetail = errorDetailArray.getString(i);
+            String errorDetail = errorDetailArray.getString(i).trim();
             switch (errorType) {
                 case IKE_PROTOCOL_ERROR_TYPE:
                     isValidErrorDetail = verifyIkeProtocolErrorDetail(errorDetail);

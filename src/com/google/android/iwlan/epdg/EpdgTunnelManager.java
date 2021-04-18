@@ -23,6 +23,7 @@ import static android.system.OsConstants.AF_INET6;
 
 import android.content.Context;
 import android.net.InetAddresses;
+import android.net.IpPrefix;
 import android.net.IpSecManager;
 import android.net.IpSecTransform;
 import android.net.LinkAddress;
@@ -42,6 +43,7 @@ import android.net.ipsec.ike.IkeSessionCallback;
 import android.net.ipsec.ike.IkeSessionConfiguration;
 import android.net.ipsec.ike.IkeSessionParams;
 import android.net.ipsec.ike.IkeTrafficSelector;
+import android.net.ipsec.ike.SaProposal;
 import android.net.ipsec.ike.TunnelModeChildSessionParams;
 import android.net.ipsec.ike.exceptions.IkeException;
 import android.net.ipsec.ike.exceptions.IkeProtocolException;
@@ -58,6 +60,7 @@ import android.support.annotation.NonNull;
 import android.telephony.CarrierConfigManager;
 import android.telephony.TelephonyManager;
 import android.telephony.data.ApnSetting;
+import android.telephony.data.NetworkSliceInfo;
 import android.util.Log;
 
 import com.android.internal.annotations.VisibleForTesting;
@@ -162,48 +165,43 @@ public class EpdgTunnelManager {
                 Collections.unmodifiableSet(
                         new HashSet<>(
                                 Arrays.asList(
-                                        CarrierConfigManager.Iwlan.DH_GROUP_1024_BIT_MODP,
-                                        CarrierConfigManager.Iwlan.DH_GROUP_1536_BIT_MODP,
-                                        CarrierConfigManager.Iwlan.DH_GROUP_2048_BIT_MODP)));
+                                        SaProposal.DH_GROUP_1024_BIT_MODP,
+                                        SaProposal.DH_GROUP_1536_BIT_MODP,
+                                        SaProposal.DH_GROUP_2048_BIT_MODP)));
         VALID_KEY_LENGTHS =
                 Collections.unmodifiableSet(
                         new HashSet<>(
                                 Arrays.asList(
-                                        CarrierConfigManager.Iwlan.KEY_LEN_AES_128,
-                                        CarrierConfigManager.Iwlan.KEY_LEN_AES_192,
-                                        CarrierConfigManager.Iwlan.KEY_LEN_AES_256)));
+                                        SaProposal.KEY_LEN_AES_128,
+                                        SaProposal.KEY_LEN_AES_192,
+                                        SaProposal.KEY_LEN_AES_256)));
 
         VALID_ENCRYPTION_ALGOS =
                 Collections.unmodifiableSet(
                         new HashSet<>(
                                 Arrays.asList(
-                                        CarrierConfigManager.Iwlan.ENCRYPTION_ALGORITHM_AES_CBC,
-                                        CarrierConfigManager.Iwlan.ENCRYPTION_ALGORITHM_AES_CTR)));
+                                        SaProposal.ENCRYPTION_ALGORITHM_AES_CBC,
+                                        SaProposal.ENCRYPTION_ALGORITHM_AES_CTR)));
 
         VALID_INTEGRITY_ALGOS =
                 Collections.unmodifiableSet(
                         new HashSet<>(
                                 Arrays.asList(
-                                        CarrierConfigManager.Iwlan.INTEGRITY_ALGORITHM_HMAC_SHA1_96,
-                                        CarrierConfigManager.Iwlan.INTEGRITY_ALGORITHM_AES_XCBC_96,
-                                        CarrierConfigManager.Iwlan
-                                                .INTEGRITY_ALGORITHM_HMAC_SHA2_256_128,
-                                        CarrierConfigManager.Iwlan
-                                                .INTEGRITY_ALGORITHM_HMAC_SHA2_384_192,
-                                        CarrierConfigManager.Iwlan
-                                                .INTEGRITY_ALGORITHM_HMAC_SHA2_512_256)));
+                                        SaProposal.INTEGRITY_ALGORITHM_HMAC_SHA1_96,
+                                        SaProposal.INTEGRITY_ALGORITHM_AES_XCBC_96,
+                                        SaProposal.INTEGRITY_ALGORITHM_HMAC_SHA2_256_128,
+                                        SaProposal.INTEGRITY_ALGORITHM_HMAC_SHA2_384_192,
+                                        SaProposal.INTEGRITY_ALGORITHM_HMAC_SHA2_512_256)));
 
         VALID_PRF_ALGOS =
                 Collections.unmodifiableSet(
                         new HashSet<>(
                                 Arrays.asList(
-                                        CarrierConfigManager.Iwlan.PSEUDORANDOM_FUNCTION_HMAC_SHA1,
-                                        CarrierConfigManager.Iwlan
-                                                .PSEUDORANDOM_FUNCTION_AES128_XCBC,
-                                        CarrierConfigManager.Iwlan.PSEUDORANDOM_FUNCTION_SHA2_256,
-                                        CarrierConfigManager.Iwlan.PSEUDORANDOM_FUNCTION_SHA2_384,
-                                        CarrierConfigManager.Iwlan
-                                                .PSEUDORANDOM_FUNCTION_SHA2_512)));
+                                        SaProposal.PSEUDORANDOM_FUNCTION_HMAC_SHA1,
+                                        SaProposal.PSEUDORANDOM_FUNCTION_AES128_XCBC,
+                                        SaProposal.PSEUDORANDOM_FUNCTION_SHA2_256,
+                                        SaProposal.PSEUDORANDOM_FUNCTION_SHA2_384,
+                                        SaProposal.PSEUDORANDOM_FUNCTION_SHA2_512)));
     }
 
     private final EpdgSelector.EpdgSelectorCallback mSelectorCallback =
@@ -219,22 +217,26 @@ public class EpdgTunnelManager {
                 }
             };
 
-    private static class TunnelConfig {
+    @VisibleForTesting
+    class TunnelConfig {
         @NonNull final TunnelCallback mTunnelCallback;
         // TODO: Change this to TunnelLinkProperties after removing autovalue
         private List<InetAddress> mPcscfAddrList;
         private List<InetAddress> mDnsAddrList;
         private List<LinkAddress> mInternalAddrList;
-        private byte[] mSnssai;
+
+        private InetAddress mSrcIpv6Address;
+        private int mSrcIpv6AddressPrefixLen;
+        private NetworkSliceInfo mSliceInfo;
         private boolean mIsBackoffTimeValid = false;
         private long mBackoffTime;
 
-        public byte[] getSnssai() {
-            return mSnssai;
+        public NetworkSliceInfo getSliceInfo() {
+            return mSliceInfo;
         }
 
-        public void setSnssai(byte[] snssai) {
-            mSnssai = snssai;
+        public void setSliceInfo(NetworkSliceInfo si) {
+            mSliceInfo = si;
         }
 
         public boolean isBackoffTimeValid() {
@@ -254,10 +256,16 @@ public class EpdgTunnelManager {
         IwlanError mError;
         private IpSecManager.IpSecTunnelInterface mIface;
 
-        public TunnelConfig(IkeSession ikeSession, TunnelCallback tunnelCallback) {
+        public TunnelConfig(
+                IkeSession ikeSession,
+                TunnelCallback tunnelCallback,
+                InetAddress srcIpv6Addr,
+                int srcIpv6PrefixLength) {
             mTunnelCallback = tunnelCallback;
             mIkeSession = ikeSession;
             mError = new IwlanError(IwlanError.NO_ERROR);
+            mSrcIpv6Address = srcIpv6Addr;
+            mSrcIpv6AddressPrefixLen = srcIpv6PrefixLength;
         }
 
         @NonNull
@@ -285,8 +293,42 @@ public class EpdgTunnelManager {
             return mInternalAddrList;
         }
 
+        boolean isPrefixSameAsSrcIP(LinkAddress laddr) {
+            if (laddr.isIpv6() && (laddr.getPrefixLength() == mSrcIpv6AddressPrefixLen)) {
+                IpPrefix assignedPrefix = new IpPrefix(laddr.getAddress(), laddr.getPrefixLength());
+                IpPrefix srcPrefix = new IpPrefix(mSrcIpv6Address, mSrcIpv6AddressPrefixLen);
+                if (assignedPrefix.equals(srcPrefix)) {
+                    return true;
+                }
+            }
+            return false;
+        }
+
         public void setInternalAddrList(List<LinkAddress> internalAddrList) {
-            mInternalAddrList = internalAddrList;
+            mInternalAddrList = new ArrayList<LinkAddress>(internalAddrList);
+            if (getSrcIpv6Address() != null) {
+                // check if we can reuse src ipv6 address (i.e if prefix is same)
+                for (LinkAddress assignedAddr : internalAddrList) {
+                    if (isPrefixSameAsSrcIP(assignedAddr)) {
+                        // the assigned IPv6 address is same as pre-Handover IPv6
+                        // addr. Just reuse the pre-Handover Address so the IID is
+                        // preserved
+                        mInternalAddrList.remove(assignedAddr);
+
+                        // add original address
+                        mInternalAddrList.add(
+                                new LinkAddress(mSrcIpv6Address, mSrcIpv6AddressPrefixLen));
+
+                        Log.d(
+                                TAG,
+                                "Network assigned IP replaced OLD:"
+                                        + internalAddrList
+                                        + " NEW:"
+                                        + mInternalAddrList);
+                        break;
+                    }
+                }
+            }
         }
 
         @NonNull
@@ -308,6 +350,14 @@ public class EpdgTunnelManager {
 
         public void setIface(IpSecManager.IpSecTunnelInterface iface) {
             mIface = iface;
+        }
+
+        public InetAddress getSrcIpv6Address() {
+            return mSrcIpv6Address;
+        }
+
+        public int getSrcIpv6AddressPrefixLen() {
+            return mSrcIpv6AddressPrefixLen;
         }
     }
 
@@ -365,13 +415,22 @@ public class EpdgTunnelManager {
                 TunnelConfig tunnelConfig = mApnNameToTunnelConfig.get(mApnName);
                 for (Ike3gppData payload : payloads) {
                     if (payload.getDataType() == DATA_TYPE_NOTIFY_N1_MODE_INFORMATION) {
-                        tunnelConfig.setSnssai(((Ike3gppN1ModeInformation) payload).getSnssai());
+                        Log.d(TAG, "Got payload DATA_TYPE_NOTIFY_N1_MODE_INFORMATION");
+                        NetworkSliceInfo si =
+                                NetworkSliceSelectionAssistanceInformation.getSliceInfo(
+                                        ((Ike3gppN1ModeInformation) payload).getSnssai());
+                        if (si != null) {
+                            tunnelConfig.setSliceInfo(si);
+                            Log.d(TAG, "SliceInfo: " + si);
+                        }
                     } else if (payload.getDataType() == DATA_TYPE_NOTIFY_BACKOFF_TIMER) {
+                        Log.d(TAG, "Got payload DATA_TYPE_NOTIFY_BACKOFF_TIMER");
                         long backoffTime =
                                 decodeBackoffTime(
                                         ((Ike3gppBackoffTimer) payload).getBackoffTimer());
                         if (backoffTime > 0) {
                             tunnelConfig.setBackoffTime(backoffTime);
+                            Log.d(TAG, "Backoff Timer: " + backoffTime);
                         }
                     }
                 }
@@ -398,7 +457,7 @@ public class EpdgTunnelManager {
 
             IpSecManager.IpSecTunnelInterface tunnelInterface = tunnelConfig.getIface();
 
-            for (LinkAddress address : sessionConfiguration.getInternalAddresses()) {
+            for (LinkAddress address : tunnelConfig.getInternalAddrList()) {
                 try {
                     tunnelInterface.addAddress(address.getAddress(), address.getPrefixLength());
                 } catch (IOException e) {
@@ -412,7 +471,7 @@ public class EpdgTunnelManager {
                             .setDnsAddresses(tunnelConfig.getDnsAddrList())
                             .setPcscfAddresses(tunnelConfig.getPcscfAddrList())
                             .setIfaceName(tunnelConfig.getIface().getInterfaceName())
-                            .setSNssai(tunnelConfig.getSnssai())
+                            .setSliceInfo(tunnelConfig.getSliceInfo())
                             .build();
             mHandler.dispatchMessage(
                     mHandler.obtainMessage(
@@ -586,7 +645,13 @@ public class EpdgTunnelManager {
                                 getTmIkeSessionCallback(apnName),
                                 new TmChildSessionCallBack(apnName));
 
-        putApnNameToTunnelConfig(apnName, ikeSession, tunnelCallback);
+        boolean isSrcIpv6Present = setupRequest.srcIpv6Address().isPresent();
+        putApnNameToTunnelConfig(
+                apnName,
+                ikeSession,
+                tunnelCallback,
+                isSrcIpv6Present ? setupRequest.srcIpv6Address().get() : null,
+                setupRequest.srcIpv6AddressPrefixLength());
     }
 
     /**
@@ -733,6 +798,10 @@ public class EpdgTunnelManager {
 
         IkeSessionParams.Builder builder =
                 new IkeSessionParams.Builder(mContext)
+                        //permanently hardcode DSCP to 46 (Expedited Forwarding class)
+                        //See https://www.iana.org/assignments/dscp-registry/dscp-registry.xhtml
+                        //This will make WiFi prioritize IKE signallig under WMM AC_VO
+                        .setDscp(46)
                         .setServerHostname(mEpdgAddress.getHostName())
                         .setLocalIdentification(getLocalIdentification())
                         .setRemoteIdentification(getId(setupRequest.apnName(), false))
@@ -825,7 +894,7 @@ public class EpdgTunnelManager {
         for (int encryptionAlgo : encryptionAlgos) {
             validateConfig(encryptionAlgo, VALID_ENCRYPTION_ALGOS, CONFIG_TYPE_ENCRYPT_ALGO);
 
-            if (encryptionAlgo == CarrierConfigManager.Iwlan.ENCRYPTION_ALGORITHM_AES_CBC) {
+            if (encryptionAlgo == SaProposal.ENCRYPTION_ALGORITHM_AES_CBC) {
                 int[] aesCbcKeyLens =
                         getConfig(
                                 CarrierConfigManager.Iwlan
@@ -837,7 +906,7 @@ public class EpdgTunnelManager {
                 }
             }
 
-            if (encryptionAlgo == CarrierConfigManager.Iwlan.ENCRYPTION_ALGORITHM_AES_CTR) {
+            if (encryptionAlgo == SaProposal.ENCRYPTION_ALGORITHM_AES_CTR) {
                 int[] aesCtrKeyLens =
                         getConfig(
                                 CarrierConfigManager.Iwlan
@@ -900,7 +969,7 @@ public class EpdgTunnelManager {
         for (int encryptionAlgo : encryptionAlgos) {
             if (validateConfig(encryptionAlgo, VALID_ENCRYPTION_ALGOS, CONFIG_TYPE_ENCRYPT_ALGO)) {
                 if (ChildSaProposal.getSupportedEncryptionAlgorithms().contains(encryptionAlgo)) {
-                    if (encryptionAlgo == CarrierConfigManager.Iwlan.ENCRYPTION_ALGORITHM_AES_CBC) {
+                    if (encryptionAlgo == SaProposal.ENCRYPTION_ALGORITHM_AES_CBC) {
                         int[] aesCbcKeyLens =
                                 getConfig(
                                         CarrierConfigManager.Iwlan
@@ -914,7 +983,7 @@ public class EpdgTunnelManager {
                         }
                     }
 
-                    if (encryptionAlgo == CarrierConfigManager.Iwlan.ENCRYPTION_ALGORITHM_AES_CTR) {
+                    if (encryptionAlgo == SaProposal.ENCRYPTION_ALGORITHM_AES_CTR) {
                         int[] aesCtrKeyLens =
                                 getConfig(
                                         CarrierConfigManager.Iwlan
@@ -1026,7 +1095,7 @@ public class EpdgTunnelManager {
                 String message = error.getException().getCause().getMessage();
                 if (message != null
                         && (message.equals("Retransmitting IKE INIT request failure")
-                        || message.equals("Retransmitting failure"))) {
+                                || message.equals("Retransmitting failure"))) {
                     return true;
                 }
             }
@@ -1543,8 +1612,14 @@ public class EpdgTunnelManager {
 
     @VisibleForTesting
     void putApnNameToTunnelConfig(
-            String apnName, IkeSession ikeSession, TunnelCallback tunnelCallback) {
-        mApnNameToTunnelConfig.put(apnName, new TunnelConfig(ikeSession, tunnelCallback));
+            String apnName,
+            IkeSession ikeSession,
+            TunnelCallback tunnelCallback,
+            InetAddress srcIpv6Addr,
+            int srcIPv6AddrPrefixLen) {
+        mApnNameToTunnelConfig.put(
+                apnName,
+                new TunnelConfig(ikeSession, tunnelCallback, srcIpv6Addr, srcIPv6AddrPrefixLen));
     }
 
     @VisibleForTesting
