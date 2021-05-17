@@ -37,10 +37,11 @@ import android.net.ipsec.ike.IkeFqdnIdentification;
 import android.net.ipsec.ike.IkeSession;
 import android.net.ipsec.ike.IkeSessionCallback;
 import android.net.ipsec.ike.IkeSessionParams;
+import android.net.ipsec.ike.SaProposal;
 import android.net.ipsec.ike.TunnelModeChildSessionParams;
 import android.net.ipsec.ike.exceptions.IkeException;
 import android.net.ipsec.ike.exceptions.IkeInternalException;
-import android.net.ipsec.ike.exceptions.InvalidIkeSpiException;
+import android.net.ipsec.ike.exceptions.IkeProtocolException;
 import android.net.ipsec.ike.ike3gpp.Ike3gppBackoffTimer;
 import android.net.ipsec.ike.ike3gpp.Ike3gppData;
 import android.net.ipsec.ike.ike3gpp.Ike3gppExtension;
@@ -761,6 +762,17 @@ public class EpdgTunnelManagerTest {
     }
 
     private void setupMockForGetConfig(PersistableBundle bundle) {
+        if (bundle == null) {
+            bundle = new PersistableBundle();
+        }
+        bundle.putIntArray(
+                CarrierConfigManager.Iwlan.KEY_SUPPORTED_INTEGRITY_ALGORITHMS_INT_ARRAY,
+                new int[] {
+                    SaProposal.INTEGRITY_ALGORITHM_HMAC_SHA1_96,
+                    SaProposal.INTEGRITY_ALGORITHM_HMAC_SHA2_256_128,
+                    SaProposal.INTEGRITY_ALGORITHM_HMAC_SHA2_384_192,
+                    SaProposal.INTEGRITY_ALGORITHM_HMAC_SHA2_512_256,
+                });
         when(mMockContext.getSystemService(eq(CarrierConfigManager.class)))
                 .thenReturn(mMockCarrierConfigManager);
         when(mMockContext.getSystemService(eq(SubscriptionManager.class)))
@@ -1038,7 +1050,12 @@ public class EpdgTunnelManagerTest {
     @Test
     public void testReportIwlanErrorIkeProtocolException() throws Exception {
         String testApnName = "www.xyz.com";
-        InvalidIkeSpiException mockException = new InvalidIkeSpiException();
+
+        IkeProtocolException mockException = mock(IkeProtocolException.class);
+        doReturn(IkeProtocolException.ERROR_TYPE_INVALID_IKE_SPI)
+                .when(mockException)
+                .getErrorType();
+        doReturn(new byte[0]).when(mockException).getErrorData();
         IwlanError error = new IwlanError(mockException);
 
         doReturn(0L).when(mEpdgTunnelManager).reportIwlanError(eq(testApnName), eq(error));
@@ -1225,7 +1242,6 @@ public class EpdgTunnelManagerTest {
     @Test
     public void testTunnelSetupRequestParams() throws Exception {
         String testApnName = "www.xyz.com";
-        Network testNetwork = new Network(123);
         Inet6Address testAddressV6 = Inet6Address.getByAddress("25.25.25.25", new byte[16], 0);
         Inet4Address testAddressV4 = (Inet4Address) Inet4Address.getByName("30.30.30.30");
         int pduSessionId = 5;
@@ -1237,7 +1253,7 @@ public class EpdgTunnelManagerTest {
         TunnelSetupRequest tsr =
                 TunnelSetupRequest.builder()
                         .setApnName(testApnName)
-                        .setNetwork(testNetwork)
+                        .setNetwork(mMockNetwork)
                         .setApnIpProtocol(ApnSetting.PROTOCOL_IPV4V6)
                         .setSrcIpv6Address(testAddressV6)
                         .setSrcIpv6AddressPrefixLength(ipv6AddressLen)
@@ -1253,7 +1269,7 @@ public class EpdgTunnelManagerTest {
                         anyInt(),
                         eq(isRoaming),
                         eq(isEmergency),
-                        eq(testNetwork),
+                        eq(mMockNetwork),
                         any(EpdgSelector.EpdgSelectorCallback.class)))
                 .thenReturn(new IwlanError(IwlanError.NO_ERROR));
 
@@ -1277,7 +1293,7 @@ public class EpdgTunnelManagerTest {
                         anyInt(), // only Ipv6 address is added
                         eq(isRoaming),
                         eq(isEmergency),
-                        eq(testNetwork),
+                        eq(mMockNetwork),
                         any(EpdgSelector.EpdgSelectorCallback.class));
 
         ArrayList<InetAddress> ipList = new ArrayList<>();
@@ -1308,7 +1324,7 @@ public class EpdgTunnelManagerTest {
         assertEquals(ikeId.fqdn, testApnName);
 
         // verify Network
-        assertEquals(ikeSessionParams.getConfiguredNetwork(), testNetwork);
+        assertEquals(ikeSessionParams.getNetwork(), mMockNetwork);
 
         // verify requestPcscf (true) with Apn protocol IPV6
         // it should add the pcscf config requests of type ConfigRequestIpv6PcscfServer and
