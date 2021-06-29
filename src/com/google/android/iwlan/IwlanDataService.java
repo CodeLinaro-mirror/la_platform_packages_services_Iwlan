@@ -207,19 +207,10 @@ public class IwlanDataService extends DataService {
             static final int TUNNEL_IN_BRINGDOWN = 4;
             private DataServiceCallback dataServiceCallback;
             private int mState;
-            private int mPduSessionId;
             private TunnelLinkProperties mTunnelLinkProperties;
             private boolean mIsHandover;
             private Date mBringUpStateTime = null;
             private Date mUpStateTime = null;
-
-            public int getPduSessionId() {
-                return mPduSessionId;
-            }
-
-            public void setPduSessionId(int mPduSessionId) {
-                this.mPduSessionId = mPduSessionId;
-            }
 
             public int getProtocolType() {
                 return mProtocolType;
@@ -697,7 +688,6 @@ public class IwlanDataService extends DataService {
                     .setMtu(tunnelState.getLinkMtu())
                     .setMtuV4(tunnelState.getLinkMtu())
                     .setMtuV6(tunnelState.getLinkMtu())
-                    .setPduSessionId(tunnelState.getPduSessionId())
                     .build(); // underlying n/w is same
         }
 
@@ -841,7 +831,7 @@ public class IwlanDataService extends DataService {
                         || mTunnelStateForApn.get(dataProfile.getApn()) != null) {
                     deliverCallback(
                             CALLBACK_TYPE_SETUP_DATACALL_COMPLETE,
-                            5 /* DataServiceCallback.RESULT_ERROR_TEMPORARILY_UNAVAILABLE */,
+                            DataServiceCallback.RESULT_ERROR_ILLEGAL_STATE,
                             callback,
                             null);
                     return;
@@ -883,8 +873,7 @@ public class IwlanDataService extends DataService {
                         callback,
                         TunnelState.TUNNEL_IN_BRINGUP,
                         null,
-                        (reason == DataService.REQUEST_REASON_HANDOVER),
-                        pduSessionId);
+                        (reason == DataService.REQUEST_REASON_HANDOVER));
 
                 boolean result =
                         getTunnelManager()
@@ -991,14 +980,12 @@ public class IwlanDataService extends DataService {
                 DataServiceCallback callback,
                 int tunnelStatus,
                 TunnelLinkProperties linkProperties,
-                boolean isHandover,
-                int pduSessionId) {
+                boolean isHandover) {
             TunnelState tunnelState = new TunnelState(callback);
             tunnelState.setState(tunnelStatus);
             tunnelState.setProtocolType(dataProfile.getProtocolType());
             tunnelState.setTunnelLinkProperties(linkProperties);
             tunnelState.setIsHandover(isHandover);
-            tunnelState.setPduSessionId(pduSessionId);
             mTunnelStateForApn.put(dataProfile.getApn(), tunnelState);
         }
 
@@ -1010,28 +997,6 @@ public class IwlanDataService extends DataService {
         @VisibleForTesting
         IwlanDataTunnelStats getTunnelStats() {
             return mTunnelStats;
-        }
-
-        private void updateNetwork(Network network) {
-            if (network != null) {
-                synchronized (mTunnelStateForApn) {
-                    for (Map.Entry<String, TunnelState> entry : mTunnelStateForApn.entrySet()) {
-                        TunnelState tunnelState = entry.getValue();
-                        if (tunnelState.getState() == TunnelState.TUNNEL_IN_BRINGUP) {
-                            // force close tunnels in bringup since IKE lib only supports
-                            // updating network for tunnels that are already up
-                            getTunnelManager().closeTunnel(entry.getKey(), true);
-                        } else {
-                            if (mIwlanDataService.isNetworkConnected(
-                                    IwlanHelper.isDefaultDataSlot(mContext, getSlotIndex()),
-                                    IwlanHelper.isCrossSimCallingEnabled(
-                                            mContext, getSlotIndex()))) {
-                                getTunnelManager().updateNetwork(network, entry.getKey());
-                            }
-                        }
-                    }
-                }
-            }
         }
 
         private void dnsPrefetchCheck() {
@@ -1062,9 +1027,9 @@ public class IwlanDataService extends DataService {
 
         private void prefetchEpdgServerList(Network network, boolean isRoaming) {
             mEpdgSelector.getValidatedServerList(
-                    0, EpdgSelector.PROTO_FILTER_IPV4V6, isRoaming, false, network, null);
+                    EpdgSelector.PROTO_FILTER_IPV4V6, isRoaming, false, network, null);
             mEpdgSelector.getValidatedServerList(
-                    0, EpdgSelector.PROTO_FILTER_IPV4V6, isRoaming, true, network, null);
+                    EpdgSelector.PROTO_FILTER_IPV4V6, isRoaming, true, network, null);
         }
 
         /**
@@ -1117,13 +1082,8 @@ public class IwlanDataService extends DataService {
     /* Note: this api should have valid transport if networkConnected==true */
     static void setNetworkConnected(
             boolean networkConnected, Network network, Transport transport) {
-        boolean hasNetworkChanged = false;
         sNetworkConnected = networkConnected;
-        if (!network.equals(sNetwork)) {
-            Log.e(TAG, "setNetworkConnected NW changed from: " + sNetwork + " TO: " + network);
-            sNetwork = network;
-            hasNetworkChanged = true;
-        }
+        sNetwork = network;
         if (networkConnected) {
             if (transport == Transport.UNSPECIFIED_NETWORK) {
                 Log.e(TAG, "setNetworkConnected: Network connected but transport unspecified");
@@ -1160,12 +1120,6 @@ public class IwlanDataService extends DataService {
             }
             for (IwlanDataServiceProvider dp : sIwlanDataServiceProviderList) {
                 dp.dnsPrefetchCheck();
-            }
-
-            if (hasNetworkChanged) {
-                for (IwlanDataServiceProvider dp : sIwlanDataServiceProviderList) {
-                    dp.updateNetwork(sNetwork);
-                }
             }
         }
     }

@@ -269,8 +269,7 @@ public class IwlanDataServiceTest {
                 new DataServiceCallback(callback),
                 TunnelState.TUNNEL_UP,
                 mLinkProperties,
-                false,
-                1);
+                false);
         mIwlanDataServiceProvider.requestDataCallList(new DataServiceCallback(callback));
         latch.await(1, TimeUnit.SECONDS);
 
@@ -365,7 +364,7 @@ public class IwlanDataServiceTest {
 
         verify(mMockDataServiceCallback, timeout(1000).times(1))
                 .onSetupDataCallComplete(
-                        eq(5 /*DataServiceCallback.RESULT_ERROR_TEMPORARILY_UNAVAILABLE */), isNull());
+                        eq(DataServiceCallback.RESULT_ERROR_ILLEGAL_STATE), isNull());
     }
 
     @Test
@@ -464,7 +463,7 @@ public class IwlanDataServiceTest {
         doReturn(mMockEpdgTunnelManager).when(mSpyIwlanDataServiceProvider).getTunnelManager();
 
         mSpyIwlanDataServiceProvider.setTunnelState(
-                dp, mMockDataServiceCallback, TunnelState.TUNNEL_IN_BRINGUP, null, false, 1);
+                dp, mMockDataServiceCallback, TunnelState.TUNNEL_IN_BRINGUP, null, false);
 
         mSpyIwlanDataServiceProvider.deactivateDataCall(
                 TEST_APN_NAME.hashCode() /* cid: hashcode() of "ims" */,
@@ -498,8 +497,7 @@ public class IwlanDataServiceTest {
                 mMockDataServiceCallback,
                 TunnelState.TUNNEL_IN_BRINGUP,
                 null,
-                (setupDataReason == DataService.REQUEST_REASON_HANDOVER),
-                1);
+                (setupDataReason == DataService.REQUEST_REASON_HANDOVER));
 
         mSpyIwlanDataServiceProvider
                 .getIwlanTunnelCallback()
@@ -536,8 +534,7 @@ public class IwlanDataServiceTest {
                 mMockDataServiceCallback,
                 TunnelState.TUNNEL_IN_BRINGUP,
                 null,
-                (setupDataReason == DataService.REQUEST_REASON_HANDOVER),
-                1);
+                (setupDataReason == DataService.REQUEST_REASON_HANDOVER));
 
         mSpyIwlanDataServiceProvider
                 .getIwlanTunnelCallback()
@@ -594,7 +591,6 @@ public class IwlanDataServiceTest {
         */
         verify(mMockEpdgSelector, times(2))
                 .getValidatedServerList(
-                        eq(0),
                         eq(EpdgSelector.PROTO_FILTER_IPV4V6),
                         eq(false),
                         eq(false),
@@ -602,7 +598,6 @@ public class IwlanDataServiceTest {
                         isNull());
         verify(mMockEpdgSelector, times(2))
                 .getValidatedServerList(
-                        eq(0),
                         eq(EpdgSelector.PROTO_FILTER_IPV4V6),
                         eq(false),
                         eq(true),
@@ -673,7 +668,7 @@ public class IwlanDataServiceTest {
 
         verify(mMockDataServiceCallback, timeout(1000).times(1))
                 .onSetupDataCallComplete(
-                        eq(5 /* DataServiceCallback.RESULT_ERROR_TEMPORARILY_UNAVAILABLE */), isNull());
+                        eq(DataServiceCallback.RESULT_ERROR_ILLEGAL_STATE), isNull());
     }
 
     @Test

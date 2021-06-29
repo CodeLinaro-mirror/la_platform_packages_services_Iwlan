@@ -117,7 +117,6 @@ public class EpdgTunnelManagerTest {
 
         when(mMockEpdgSelector.getValidatedServerList(
                         anyInt(),
-                        anyInt(),
                         anyBoolean(),
                         anyBoolean(),
                         eq(mMockNetwork),
@@ -232,7 +231,6 @@ public class EpdgTunnelManagerTest {
         assertTrue(ret);
         verify(mMockEpdgSelector)
                 .getValidatedServerList(
-                        anyInt(),
                         eq(EpdgSelector.PROTO_FILTER_IPV4),
                         eq(false),
                         eq(false),
@@ -299,7 +297,6 @@ public class EpdgTunnelManagerTest {
 
         when(mMockEpdgSelector.getValidatedServerList(
                         anyInt(),
-                        anyInt(),
                         eq(false),
                         eq(false),
                         eq(mMockNetwork),
@@ -326,7 +323,7 @@ public class EpdgTunnelManagerTest {
         ArrayList<InetAddress> ipList = new ArrayList<>();
         ipList.add(InetAddress.getByName(TEST_IP_ADDRESS));
         mEpdgTunnelManager.sendSelectionRequestComplete(
-                ipList, new IwlanError(IwlanError.NO_ERROR), 1);
+                ipList, new IwlanError(IwlanError.NO_ERROR));
 
         ArgumentCaptor<IkeSessionParams> ikeSessionParamsCaptor =
                 ArgumentCaptor.forClass(IkeSessionParams.class);
@@ -365,7 +362,6 @@ public class EpdgTunnelManagerTest {
 
         when(mMockEpdgSelector.getValidatedServerList(
                         anyInt(),
-                        anyInt(),
                         eq(false),
                         eq(false),
                         eq(mMockNetwork),
@@ -392,7 +388,7 @@ public class EpdgTunnelManagerTest {
         ArrayList<InetAddress> ipList = new ArrayList<>();
         ipList.add(InetAddress.getByName(TEST_IP_ADDRESS));
         mEpdgTunnelManager.sendSelectionRequestComplete(
-                ipList, new IwlanError(IwlanError.NO_ERROR), 1);
+                ipList, new IwlanError(IwlanError.NO_ERROR));
 
         ArgumentCaptor<IkeSessionParams> ikeSessionParamsCaptor =
                 ArgumentCaptor.forClass(IkeSessionParams.class);
@@ -422,7 +418,6 @@ public class EpdgTunnelManagerTest {
         setupMockForGetConfig(bundle);
         when(mMockEpdgSelector.getValidatedServerList(
                         anyInt(),
-                        anyInt(),
                         eq(false),
                         eq(false),
                         eq(mMockNetwork),
@@ -449,7 +444,7 @@ public class EpdgTunnelManagerTest {
         ArrayList<InetAddress> ipList = new ArrayList<>();
         ipList.add(InetAddress.getByName(TEST_IP_ADDRESS));
         mEpdgTunnelManager.sendSelectionRequestComplete(
-                ipList, new IwlanError(IwlanError.NO_ERROR), 1);
+                ipList, new IwlanError(IwlanError.NO_ERROR));
 
         ArgumentCaptor<IkeSessionParams> ikeSessionParamsCaptor =
                 ArgumentCaptor.forClass(IkeSessionParams.class);
@@ -474,7 +469,6 @@ public class EpdgTunnelManagerTest {
         doReturn(0L).when(mEpdgTunnelManager).reportIwlanError(eq(testApnName), eq(error));
         setupMockForGetConfig(null);
         when(mMockEpdgSelector.getValidatedServerList(
-                        anyInt(),
                         anyInt(),
                         eq(false),
                         eq(false),
@@ -505,7 +499,7 @@ public class EpdgTunnelManagerTest {
         ipList.add(InetAddress.getByName("8.8.8.8"));
         ipList.add(InetAddress.getByName("3.3.3.3"));
         mEpdgTunnelManager.sendSelectionRequestComplete(
-                ipList, new IwlanError(IwlanError.NO_ERROR), 1);
+                ipList, new IwlanError(IwlanError.NO_ERROR));
         EpdgTunnelManager.TmIkeSessionCallback ikeSessionCallback;
         for (InetAddress ip : ipList) {
             ikeSessionCallback = verifyCreateIkeSession(ip);
@@ -534,7 +528,6 @@ public class EpdgTunnelManagerTest {
         bundle.putInt(IwlanHelper.CONFIG_KEY_MAX_IMMEDIATE_TUNNEL_SETUP_RETRIES, MAX_RETRIES);
         setupMockForGetConfig(bundle);
         when(mMockEpdgSelector.getValidatedServerList(
-                        anyInt(),
                         anyInt(),
                         eq(false),
                         eq(false),
@@ -567,7 +560,7 @@ public class EpdgTunnelManagerTest {
         ipList.add(InetAddress.getByName("4.4.4.4"));
         ipList.add(InetAddress.getByName("5.5.5.5"));
         mEpdgTunnelManager.sendSelectionRequestComplete(
-                ipList, new IwlanError(IwlanError.NO_ERROR), 1);
+                ipList, new IwlanError(IwlanError.NO_ERROR));
         EpdgTunnelManager.TmIkeSessionCallback ikeSessionCallback;
 
         for (int i = 0; i <= MAX_RETRIES; i++) {
@@ -618,28 +611,25 @@ public class EpdgTunnelManagerTest {
 
     @Test
     public void testBackOffTimeCalculation() throws Exception {
-        int transactionId = 1;
-
         // unit: 10 mins value: 2 expectedTime: 1200 (10 * 60 * 2)
-        verifyBackOffTimer("00000010", 1200, transactionId++);
+        verifyBackOffTimer("00000010", 1200);
         // unit: 1 hour value: 4 expectedTime: 14400 (1 * 60 * 60 * 4)
-        verifyBackOffTimer("00100100", 14400, transactionId++);
+        verifyBackOffTimer("00100100", 14400);
         // unit: 10 hours value: 3 expectedTime: (10 * 60 * 60 * 3)
-        verifyBackOffTimer("01000011", 108000, transactionId++);
+        verifyBackOffTimer("01000011", 108000);
         // unit: 2 secs value: 21 expectedTime: 42 (2 * 21)
-        verifyBackOffTimer("01110101", 42, transactionId++);
+        verifyBackOffTimer("01110101", 42);
         // unit: 30 secs value: 31 expectedTime: 930 (30 * 31)
-        verifyBackOffTimer("10011111", 930, transactionId++);
+        verifyBackOffTimer("10011111", 930);
         // unit: 1 min value: 25 expectedTime: 1500 (1 * 60 * 25)
-        verifyBackOffTimer("10111001", 1500, transactionId++);
+        verifyBackOffTimer("10111001", 1500);
         // unit: 1 hour value: 12 expectedTime: 43200 (1 * 60 * 60 * 12)
-        verifyBackOffTimer("11001100", 43200, transactionId++);
+        verifyBackOffTimer("11001100", 43200);
         // deactivate - Should not report backoff time.
-        verifyBackOffTimer("11100100", -1, transactionId++);
+        verifyBackOffTimer("11100100", -1);
     }
 
-    private void verifyBackOffTimer(String backoffByte, long expectedBackoffTime, int transactionId)
-            throws Exception {
+    private void verifyBackOffTimer(String backoffByte, long expectedBackoffTime) throws Exception {
         String testApnName = "www.xyz.com";
         IwlanError error = new IwlanError(new IkeInternalException(new Exception()));
         Ike3gppBackoffTimer mockIke3gppBackoffTimer = mock(Ike3gppBackoffTimer.class);
@@ -663,7 +653,6 @@ public class EpdgTunnelManagerTest {
 
         setupMockForGetConfig(null);
         when(mMockEpdgSelector.getValidatedServerList(
-                        anyInt(),
                         anyInt(),
                         eq(false),
                         eq(false),
@@ -691,7 +680,7 @@ public class EpdgTunnelManagerTest {
         ArrayList<InetAddress> ipList = new ArrayList<>();
         ipList.add(InetAddress.getByName("1.1.1.1"));
         mEpdgTunnelManager.sendSelectionRequestComplete(
-                ipList, new IwlanError(IwlanError.NO_ERROR), transactionId);
+                ipList, new IwlanError(IwlanError.NO_ERROR));
         ArgumentCaptor<IkeSessionParams> ikeSessionParamsCaptor =
                 ArgumentCaptor.forClass(IkeSessionParams.class);
         ArgumentCaptor<EpdgTunnelManager.TmIkeSessionCallback> ikeSessionCallbackCaptor =
@@ -841,7 +830,7 @@ public class EpdgTunnelManagerTest {
         ArrayList<InetAddress> ipList = new ArrayList<>();
         ipList.add(InetAddress.getByName(TEST_IP_ADDRESS));
         mEpdgTunnelManager.sendSelectionRequestComplete(
-                ipList, new IwlanError(IwlanError.NO_ERROR), 1);
+                ipList, new IwlanError(IwlanError.NO_ERROR));
 
         mEpdgTunnelManager.setIsEpdgAddressSelected(false);
 
@@ -893,7 +882,7 @@ public class EpdgTunnelManagerTest {
         ArrayList<InetAddress> ipList = new ArrayList<>();
         ipList.add(InetAddress.getByName(TEST_IP_ADDRESS));
         mEpdgTunnelManager.sendSelectionRequestComplete(
-                ipList, new IwlanError(IwlanError.NO_ERROR), 1);
+                ipList, new IwlanError(IwlanError.NO_ERROR));
 
         mEpdgTunnelManager.setIsEpdgAddressSelected(false);
 
@@ -944,7 +933,6 @@ public class EpdgTunnelManagerTest {
 
         when(mMockEpdgSelector.getValidatedServerList(
                         anyInt(),
-                        anyInt(),
                         eq(false),
                         eq(false),
                         eq(mMockNetwork),
@@ -981,7 +969,7 @@ public class EpdgTunnelManagerTest {
         ArrayList<InetAddress> ipList = new ArrayList<>();
         ipList.add(InetAddress.getByName(TEST_IP_ADDRESS));
         mEpdgTunnelManager.sendSelectionRequestComplete(
-                ipList, new IwlanError(IwlanError.NO_ERROR), 1);
+                ipList, new IwlanError(IwlanError.NO_ERROR));
 
         ArgumentCaptor<IkeSessionParams> ikeSessionParamsCaptor =
                 ArgumentCaptor.forClass(IkeSessionParams.class);
@@ -1103,7 +1091,7 @@ public class EpdgTunnelManagerTest {
                         mMockIwlanTunnelCallback);
         assertTrue(ret);
 
-        mEpdgTunnelManager.sendSelectionRequestComplete(null, error, 1);
+        mEpdgTunnelManager.sendSelectionRequestComplete(null, error);
         mEpdgTunnelManager.setIsEpdgAddressSelected(false);
 
         verify(mEpdgTunnelManager, times(1)).reportIwlanError(eq(testApnName), eq(error));
@@ -1138,7 +1126,6 @@ public class EpdgTunnelManagerTest {
 
         when(mMockEpdgSelector.getValidatedServerList(
                         anyInt(),
-                        anyInt(),
                         eq(false),
                         eq(false),
                         eq(mMockNetwork),
@@ -1169,7 +1156,7 @@ public class EpdgTunnelManagerTest {
         ArrayList<InetAddress> ipList = new ArrayList<>();
         ipList.add(InetAddress.getByName(TEST_IP_ADDRESS));
         mEpdgTunnelManager.sendSelectionRequestComplete(
-                ipList, new IwlanError(IwlanError.NO_ERROR), 1);
+                ipList, new IwlanError(IwlanError.NO_ERROR));
 
         ArgumentCaptor<IkeSessionParams> ikeSessionParamsCaptor =
                 ArgumentCaptor.forClass(IkeSessionParams.class);
@@ -1208,7 +1195,6 @@ public class EpdgTunnelManagerTest {
         setupMockForGetConfig(bundle);
         when(mMockEpdgSelector.getValidatedServerList(
                         anyInt(),
-                        anyInt(),
                         eq(false),
                         eq(false),
                         eq(mMockNetwork),
@@ -1235,7 +1221,7 @@ public class EpdgTunnelManagerTest {
         ArrayList<InetAddress> ipList = new ArrayList<>();
         ipList.add(InetAddress.getByName(TEST_IP_ADDRESS));
         mEpdgTunnelManager.sendSelectionRequestComplete(
-                ipList, new IwlanError(IwlanError.NO_ERROR), 1);
+                ipList, new IwlanError(IwlanError.NO_ERROR));
 
         ArgumentCaptor<IkeSessionParams> ikeSessionParamsCaptor =
                 ArgumentCaptor.forClass(IkeSessionParams.class);
@@ -1281,7 +1267,6 @@ public class EpdgTunnelManagerTest {
         setupMockForGetConfig(null);
         when(mMockEpdgSelector.getValidatedServerList(
                         anyInt(),
-                        anyInt(),
                         eq(isRoaming),
                         eq(isEmergency),
                         eq(mMockNetwork),
@@ -1305,7 +1290,6 @@ public class EpdgTunnelManagerTest {
         // verify isRoaming, isEmergency and Network variables.
         verify(mMockEpdgSelector)
                 .getValidatedServerList(
-                        anyInt(),
                         anyInt(), // only Ipv6 address is added
                         eq(isRoaming),
                         eq(isEmergency),
@@ -1315,7 +1299,7 @@ public class EpdgTunnelManagerTest {
         ArrayList<InetAddress> ipList = new ArrayList<>();
         ipList.add(InetAddress.getByName(TEST_IP_ADDRESS));
         mEpdgTunnelManager.sendSelectionRequestComplete(
-                ipList, new IwlanError(IwlanError.NO_ERROR), 1);
+                ipList, new IwlanError(IwlanError.NO_ERROR));
 
         ArgumentCaptor<IkeSessionParams> ikeSessionParamsCaptor =
                 ArgumentCaptor.forClass(IkeSessionParams.class);
