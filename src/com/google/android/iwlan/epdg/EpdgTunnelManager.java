@@ -41,6 +41,7 @@ import android.net.ipsec.ike.IkeSaProposal;
 import android.net.ipsec.ike.IkeSession;
 import android.net.ipsec.ike.IkeSessionCallback;
 import android.net.ipsec.ike.IkeSessionConfiguration;
+import android.net.ipsec.ike.IkeSessionConnectionInfo;
 import android.net.ipsec.ike.IkeSessionParams;
 import android.net.ipsec.ike.IkeTrafficSelector;
 import android.net.ipsec.ike.SaProposal;
@@ -82,7 +83,6 @@ import java.util.Collections;
 import java.util.HashSet;
 import java.util.LinkedList;
 import java.util.List;
-import java.util.ListIterator;
 import java.util.Map;
 import java.util.Queue;
 import java.util.Set;
@@ -106,6 +106,7 @@ public class EpdgTunnelManager {
     private static final int EVENT_EPDG_ADDRESS_SELECTION_REQUEST_COMPLETE = 6;
     private static final int EVENT_IPSEC_TRANSFORM_CREATED = 7;
     private static final int EVENT_IPSEC_TRANSFORM_DELETED = 8;
+    private static final int EVENT_UPDATE_NETWORK = 9;
     private static final int IKE_HARD_LIFETIME_SEC_MINIMUM = 300;
     private static final int IKE_HARD_LIFETIME_SEC_MAXIMUM = 86400;
     private static final int IKE_SOFT_LIFETIME_SEC_MINIMUM = 120;
@@ -136,14 +137,12 @@ public class EpdgTunnelManager {
 
     private Queue<TunnelRequestWrapper> mRequestQueue = new LinkedList<>();
 
-    private List<InetAddress> mValidEpdgAddrList;
-    private ListIterator<InetAddress> mValidEpdgAddrListIter;
+    private EpdgInfo mValidEpdgInfo = new EpdgInfo();
     private InetAddress mEpdgAddress;
     private Network mNetwork;
     private int mTransactionId = 0;
     private boolean mIsEpdgAddressSelected;
     private IkeSessionCreator mIkeSessionCreator;
-    private int mCurrentNumberOfRetries;
 
     private Map<String, TunnelConfig> mApnNameToTunnelConfig = new ConcurrentHashMap<>();
 
@@ -452,6 +451,19 @@ public class EpdgTunnelManager {
                             + " ErrorData:"
                             + exception.getMessage());
         }
+
+        @Override
+        public void onIkeSessionConnectionInfoChanged(
+                IkeSessionConnectionInfo ikeSessionConnectionInfo) {
+            Log.d(TAG, "Ike session connection info changed for apn: " + mApnName);
+            TunnelConfig tunnelConfig = mApnNameToTunnelConfig.get(mApnName);
+            IpSecManager.IpSecTunnelInterface tunnelInterface = tunnelConfig.getIface();
+            try {
+                tunnelInterface.setUnderlyingNetwork(ikeSessionConnectionInfo.getNetwork());
+            } catch (IOException e) {
+                Log.e(TAG, "IOException while updating underlying network for apn: " + mApnName);
+            }
+        }
     }
 
     @VisibleForTesting
@@ -551,6 +563,23 @@ public class EpdgTunnelManager {
         }
 
         @Override
+        public void onIpSecTransformsMigrated(
+                IpSecTransform inIpSecTransform, IpSecTransform outIpSecTransform) {
+            // migration is similar to addition
+            Log.d(TAG, "Transforms migrated for apn: + " + mApnName);
+            mHandler.dispatchMessage(
+                    mHandler.obtainMessage(
+                            EVENT_IPSEC_TRANSFORM_CREATED,
+                            new IpsecTransformData(
+                                    inIpSecTransform, IpSecManager.DIRECTION_IN, mApnName)));
+            mHandler.dispatchMessage(
+                    mHandler.obtainMessage(
+                            EVENT_IPSEC_TRANSFORM_CREATED,
+                            new IpsecTransformData(
+                                    outIpSecTransform, IpSecManager.DIRECTION_OUT, mApnName)));
+        }
+
+        @Override
         public void onIpSecTransformCreated(IpSecTransform ipSecTransform, int direction) {
             Log.d(TAG, "Transform created, direction: " + direction + ", apn:" + mApnName);
             mHandler.dispatchMessage(
@@ -571,7 +600,6 @@ public class EpdgTunnelManager {
         mContext = context;
         mSlotId = slotId;
         mIkeSessionCreator = new IkeSessionCreator();
-        mCurrentNumberOfRetries = 0;
         TAG = EpdgTunnelManager.class.getSimpleName() + "[" + mSlotId + "]";
         initHandler();
     }
@@ -635,6 +663,20 @@ public class EpdgTunnelManager {
         return true;
     }
 
+    /**
+     * Update the local Network. This will trigger a revaluation for every tunnel for which tunnel
+     * manager has state.
+     *
+     * <p>Tunnels in bringup state will be for closed since IKE currently keeps retrying.
+     *
+     * <p>For rest of the tunnels, update IKE session wth new network. This will either result in
+     * MOBIKE callflow or just a rekey over new Network
+     */
+    public void updateNetwork(@NonNull Network network, String apnName) {
+        UpdateNetworkWrapper updateNetworkWrapper = new UpdateNetworkWrapper(network, apnName);
+        mHandler.dispatchMessage(
+                mHandler.obtainMessage(EVENT_UPDATE_NETWORK, updateNetworkWrapper));
+    }
     /**
      * Bring up epdg tunnel. Only one bring up request per apn is expected. All active tunnel
      * requests and tunnels are expected to be on the same network.
@@ -874,6 +916,7 @@ public class EpdgTunnelManager {
                         .addSaProposal(buildIkeSaProposal())
                         .setNetwork(mNetwork)
                         .addIkeOption(IkeSessionParams.IKE_OPTION_ACCEPT_ANY_REMOTE_ID)
+                        .addIkeOption(IkeSessionParams.IKE_OPTION_MOBIKE)
                         .setLifetimeSeconds(hardTimeSeconds, softTimeSeconds)
                         .setRetransmissionTimeoutsMillis(getRetransmissionTimeoutsFromConfig())
                         .setDpdDelaySeconds(getDpdDelayFromConfig());
@@ -1154,21 +1197,6 @@ public class EpdgTunnelManager {
         mHandler.dispatchMessage(mHandler.obtainMessage(sessionType, apnName));
     }
 
-    private boolean shouldTryNextServerForError(IwlanError error) {
-        // Retry only for server timeout errors.
-        if (error.getErrorType() == IwlanError.IKE_INTERNAL_IO_EXCEPTION) {
-            if (error.getException().getCause() != null) {
-                String message = error.getException().getCause().getMessage();
-                if (message != null
-                        && (message.equals("Retransmitting IKE INIT request failure")
-                                || message.equals("Retransmitting failure"))) {
-                    return true;
-                }
-            }
-        }
-        return false;
-    }
-
     private final class TmHandler extends Handler {
         private final String TAG = TmHandler.class.getSimpleName();
 
@@ -1221,13 +1249,8 @@ public class EpdgTunnelManager {
                     }
 
                     if (selectorResult.getEpdgError().getErrorType() == IwlanError.NO_ERROR
-                            && (mValidEpdgAddrList = selectorResult.getValidIpList()) != null
-                            && (mEpdgAddress = getNextValidEpdgAddress()) != null) {
-                        Log.d(
-                                TAG,
-                                "mValidEpdgAddrList: "
-                                        + Arrays.toString(mValidEpdgAddrList.toArray()));
-                        mCurrentNumberOfRetries++;
+                            && selectorResult.getValidIpList() != null) {
+                        validateAndSetEpdgAddress(selectorResult.getValidIpList());
                         onBringUpTunnel(
                                 tunnelRequestWrapper.getSetupRequest(),
                                 tunnelRequestWrapper.getTunnelCallback());
@@ -1250,7 +1273,7 @@ public class EpdgTunnelManager {
                             .getTunnelCallback()
                             .onOpened(apnName, tunnelOpenedData.getLinkProperties());
                     setIsEpdgAddressSelected(true);
-                    mCurrentNumberOfRetries = 0;
+                    mValidEpdgInfo.resetIndex();
                     mRequestQueue.poll();
                     printRequestQueue("EVENT_CHILD_SESSION_OPENED");
                     serviceAllPendingRequests();
@@ -1268,52 +1291,14 @@ public class EpdgTunnelManager {
                     }
 
                     if (!mIsEpdgAddressSelected) {
-                        // Retry only if it is an IKE_INTERNAL_IO_EXCEPTION
-                        // TODO: double check if this is sent for internal timeout
-                        // and retry only for server timeouts. b/176539488
-                        if (shouldTryNextServerForError(iwlanError)) {
-                            int maxRetries = IwlanHelper.getMaxRetries(mContext, mSlotId);
-                            // If all epdg addresses are exhausted or if the number of retries
-                            // exceeded
-                            // maximum retries:
-                            // reset the iterator, reset mCurrentNumberOfRetries and go to
-                            // the next request.
-                            if ((mEpdgAddress = getNextValidEpdgAddress()) == null
-                                    || mCurrentNumberOfRetries > maxRetries) {
-                                Log.d(TAG, "Reset mValidEpdgAddrListIter");
-                                mRequestQueue.poll();
-                                mValidEpdgAddrListIter = mValidEpdgAddrList.listIterator();
-                                mEpdgAddress = getNextValidEpdgAddress();
-                                if (tunnelConfig.isBackoffTimeValid()) {
-                                    reportIwlanError(
-                                            apnName, iwlanError, tunnelConfig.getBackoffTime());
-                                } else {
-                                    reportIwlanError(apnName, iwlanError);
-                                }
-                                tunnelConfig
-                                        .getTunnelCallback()
-                                        .onClosed(apnName, tunnelConfig.getError());
-                                mCurrentNumberOfRetries = 0;
-                            }
-                            // Use the next request if present in queue to bring up tunnel
-                            if ((tunnelRequestWrapper = mRequestQueue.peek()) != null) {
-                                Log.d(TAG, "Use next request in the queue to bring up tunnel");
-                                mCurrentNumberOfRetries++;
-                                onBringUpTunnel(
-                                        tunnelRequestWrapper.getSetupRequest(),
-                                        tunnelRequestWrapper.getTunnelCallback());
-                            }
-                        } else {
-                            // fail all the requests. report back off timer, if present, to the
-                            // current request.
-                            if (tunnelConfig.isBackoffTimeValid()) {
-                                mRequestQueue.poll();
-                                reportIwlanError(
-                                        apnName, iwlanError, tunnelConfig.getBackoffTime());
-                                tunnelConfig.getTunnelCallback().onClosed(apnName, iwlanError);
-                            }
-                            failAllPendingRequests(iwlanError);
+                        // fail all the requests. report back off timer, if present, to the
+                        // current request.
+                        if (tunnelConfig.isBackoffTimeValid()) {
+                            mRequestQueue.poll();
+                            reportIwlanError(apnName, iwlanError, tunnelConfig.getBackoffTime());
+                            tunnelConfig.getTunnelCallback().onClosed(apnName, iwlanError);
                         }
+                        failAllPendingRequests(iwlanError);
                     } else {
                         mRequestQueue.poll();
                         Log.d(TAG, "Tunnel Closed: " + iwlanError);
@@ -1330,20 +1315,37 @@ public class EpdgTunnelManager {
                     }
                     break;
 
+                case EVENT_UPDATE_NETWORK:
+                    UpdateNetworkWrapper updatedNetwork = (UpdateNetworkWrapper) msg.obj;
+                    apnName = updatedNetwork.getApnName();
+                    Network network = updatedNetwork.getNetwork();
+                    tunnelConfig = mApnNameToTunnelConfig.get(apnName);
+                    if (tunnelConfig == null) {
+                        Log.d(TAG, "Update Network request: No tunnel exists for apn: " + apnName);
+                    } else {
+                        Log.d(TAG, "Updating Network for apn: " + apnName + " Network: " + network);
+                        tunnelConfig.getIkeSession().setNetwork(network);
+                    }
+                    break;
                 case EVENT_TUNNEL_BRINGDOWN_REQUEST:
                     apnName = (String) msg.obj;
                     int forceClose = msg.arg1;
                     tunnelConfig = mApnNameToTunnelConfig.get(apnName);
                     if (tunnelConfig == null) {
-                        Log.d(TAG, "Bringdown request: No tunnel exists for apn: " + apnName);
+                        Log.d(
+                                TAG,
+                                "Bringdown request: No tunnel exists for apn: "
+                                        + apnName
+                                        + "forced: "
+                                        + forceClose);
                     } else {
                         if (forceClose == 1) {
                             tunnelConfig.getIkeSession().kill();
                         } else {
                             tunnelConfig.getIkeSession().close();
                         }
+                        closePendingRequestsForApn(apnName);
                     }
-                    closePendingRequestsForApn(apnName);
                     break;
 
                 case EVENT_IPSEC_TRANSFORM_CREATED:
@@ -1473,14 +1475,24 @@ public class EpdgTunnelManager {
         }
     }
 
-    private InetAddress getNextValidEpdgAddress() {
-        if (mValidEpdgAddrListIter == null && mValidEpdgAddrList != null) {
-            mValidEpdgAddrListIter = mValidEpdgAddrList.listIterator();
+    @VisibleForTesting
+    void validateAndSetEpdgAddress(List<InetAddress> selectorResultList) {
+        List<InetAddress> addrList = mValidEpdgInfo.getAddrList();
+        if (addrList == null || !addrList.equals(selectorResultList)) {
+            Log.d(TAG, "Update ePDG address list.");
+            mValidEpdgInfo.setAddrList(selectorResultList);
+            addrList = mValidEpdgInfo.getAddrList();
         }
-        if (mValidEpdgAddrListIter != null && mValidEpdgAddrListIter.hasNext()) {
-            return mValidEpdgAddrListIter.next();
-        }
-        return null;
+
+        int index = mValidEpdgInfo.getIndex();
+        Log.d(
+                TAG,
+                "Valid ePDG Address List: "
+                        + Arrays.toString(addrList.toArray())
+                        + ", index = "
+                        + index);
+        mEpdgAddress = addrList.get(index);
+        mValidEpdgInfo.incrementIndex();
     }
 
     @VisibleForTesting
@@ -1488,13 +1500,10 @@ public class EpdgTunnelManager {
         Log.d(TAG, "resetTunnelManagerState");
         mEpdgAddress = null;
         setIsEpdgAddressSelected(false);
-        mValidEpdgAddrList = null;
-        mValidEpdgAddrListIter = null;
         mNetwork = null;
         mRequestQueue = new LinkedList<>();
         mApnNameToTunnelConfig = new ConcurrentHashMap<>();
         mLocalAddresses = null;
-        mCurrentNumberOfRetries = 0;
     }
 
     private void serviceAllPendingRequests() {
@@ -1521,6 +1530,24 @@ public class EpdgTunnelManager {
         Log.d(TAG, "mRequestQueue: " + Arrays.toString(mRequestQueue.toArray()));
     }
 
+    // Update Network wrapper
+    private static final class UpdateNetworkWrapper {
+        private final Network mNetwork;
+        private final String mApnName;
+
+        private UpdateNetworkWrapper(Network network, String apnName) {
+            mNetwork = network;
+            mApnName = apnName;
+        }
+
+        public String getApnName() {
+            return mApnName;
+        }
+
+        public Network getNetwork() {
+            return mNetwork;
+        }
+    }
     // Tunnel request + tunnel callback
     private static final class TunnelRequestWrapper {
         private final TunnelSetupRequest mSetupRequest;
@@ -1615,6 +1642,41 @@ public class EpdgTunnelManager {
         }
     }
 
+    private static final class EpdgInfo {
+        private List<InetAddress> mAddrList;
+        private int mIndex;
+
+        private EpdgInfo() {
+            mAddrList = null;
+            mIndex = 0;
+        }
+
+        public List<InetAddress> getAddrList() {
+            return mAddrList;
+        }
+
+        public void setAddrList(@NonNull List<InetAddress> AddrList) {
+            mAddrList = AddrList;
+            resetIndex();
+        }
+
+        public int getIndex() {
+            return mIndex;
+        }
+
+        public void incrementIndex() {
+            if (getIndex() >= getAddrList().size() - 1) {
+                resetIndex();
+            } else {
+                mIndex++;
+            }
+        }
+
+        public void resetIndex() {
+            mIndex = 0;
+        }
+    }
+
     private int[] getRetransmissionTimeoutsFromConfig() {
         int[] timeList =
                 (int[]) getConfig(CarrierConfigManager.Iwlan.KEY_RETRANSMIT_TIMER_MSEC_INT_ARRAY);
@@ -1703,6 +1765,7 @@ public class EpdgTunnelManager {
         mApnNameToTunnelConfig.put(
                 apnName,
                 new TunnelConfig(ikeSession, tunnelCallback, srcIpv6Addr, srcIPv6AddrPrefixLen));
+        Log.d(TAG, "Added apn: " + apnName + " to TunnelConfig");
     }
 
     @VisibleForTesting
@@ -1780,7 +1843,6 @@ public class EpdgTunnelManager {
         if (mEpdgAddress != null) {
             pw.println("mEpdgAddress: " + mEpdgAddress);
         }
-        pw.println("(Number of Epdgs tried) mCurrentNumberOfRetries: " + mCurrentNumberOfRetries);
         pw.println("mApnNameToTunnelConfig:\n");
         for (Map.Entry<String, TunnelConfig> entry : mApnNameToTunnelConfig.entrySet()) {
             pw.println("APN: " + entry.getKey());
