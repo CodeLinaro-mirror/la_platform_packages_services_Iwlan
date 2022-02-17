@@ -28,6 +28,8 @@ import android.net.IpSecManager;
 import android.net.IpSecTransform;
 import android.net.LinkAddress;
 import android.net.Network;
+import android.net.eap.EapAkaInfo;
+import android.net.eap.EapInfo;
 import android.net.eap.EapSessionConfig;
 import android.net.ipsec.ike.ChildSaProposal;
 import android.net.ipsec.ike.ChildSessionCallback;
@@ -58,6 +60,7 @@ import android.os.HandlerThread;
 import android.os.Looper;
 import android.os.Message;
 import android.support.annotation.NonNull;
+import android.support.annotation.Nullable;
 import android.telephony.CarrierConfigManager;
 import android.telephony.TelephonyManager;
 import android.telephony.data.ApnSetting;
@@ -124,6 +127,9 @@ public class EpdgTunnelManager {
     private static final int NATT_KEEPALIVE_DELAY_SEC_MIN = 10;
     private static final int NATT_KEEPALIVE_DELAY_SEC_MAX = 120;
 
+    private static final int DEVICE_IMEI_LEN = 15;
+    private static final int DEVICE_IMEISV_SUFFIX_LEN = 2;
+
     private static final int TRAFFIC_SELECTOR_START_PORT = 0;
     private static final int TRAFFIC_SELECTOR_END_PORT = 65535;
     private static final String TRAFFIC_SELECTOR_IPV4_START_ADDR = "0.0.0.0";
@@ -149,6 +155,8 @@ public class EpdgTunnelManager {
     private final String TAG;
 
     private List<InetAddress> mLocalAddresses;
+
+    @Nullable private byte[] mNextReauthId = null;
 
     private static final Set<Integer> VALID_DH_GROUPS;
     private static final Set<Integer> VALID_KEY_LENGTHS;
@@ -427,6 +435,25 @@ public class EpdgTunnelManager {
             Log.d(TAG, "Ike session opened for apn: " + mApnName);
             TunnelConfig tunnelConfig = mApnNameToTunnelConfig.get(mApnName);
             tunnelConfig.setPcscfAddrList(sessionConfiguration.getPcscfServers());
+
+            boolean enabledFastReauth =
+                    (boolean)
+                            getConfig(
+                                    CarrierConfigManager.Iwlan
+                                            .KEY_ENABLE_SUPPORT_FOR_EAP_AKA_FAST_REAUTH_BOOL);
+            Log.d(
+                    TAG,
+                    "CarrierConfigManager.Iwlan.KEY_ENABLE_SUPPORT_FOR_EAP_AKA_FAST_REAUTH_BOOL "
+                            + enabledFastReauth);
+            if (enabledFastReauth) {
+                EapInfo eapInfo = sessionConfiguration.getEapInfo();
+                if (eapInfo != null && eapInfo instanceof EapAkaInfo) {
+                    mNextReauthId = ((EapAkaInfo) eapInfo).getReauthId();
+                    Log.d(TAG, "Update ReauthId: " + Arrays.toString(mNextReauthId));
+                } else {
+                    mNextReauthId = null;
+                }
+            }
         }
 
         @Override
@@ -438,12 +465,18 @@ public class EpdgTunnelManager {
         @Override
         public void onClosedExceptionally(IkeException exception) {
             Log.d(TAG, "Ike session onClosedExceptionally for apn: " + mApnName);
+
+            mNextReauthId = null;
+
             onSessionClosedWithException(exception, mApnName, EVENT_IKE_SESSION_CLOSED);
         }
 
         @Override
         public void onError(IkeProtocolException exception) {
             Log.d(TAG, "Ike session onError for apn: " + mApnName);
+
+            mNextReauthId = null;
+
             Log.d(
                     TAG,
                     "ErrorType:"
@@ -876,6 +909,28 @@ public class EpdgTunnelManager {
         return mApnNameToTunnelConfig.size();
     }
 
+    // Returns the IMEISV or device IMEI, in that order of priority.
+    private @Nullable String getMobileDeviceIdentity() {
+        TelephonyManager telephonyManager = mContext.getSystemService(TelephonyManager.class);
+        telephonyManager = telephonyManager.createForSubscriptionId(mSlotId);
+        if (telephonyManager == null) {
+            return null;
+        }
+        // Queries the 15-digit device IMEI.
+        String imei = telephonyManager.getImei();
+        if (imei == null || imei.length() != DEVICE_IMEI_LEN) {
+            Log.i(TAG, "Unable to query valid Mobile Device Identity (IMEI)!");
+            return null;
+        }
+        String imeisv_suffix = telephonyManager.getDeviceSoftwareVersion();
+        if (imeisv_suffix == null || imeisv_suffix.length() != DEVICE_IMEISV_SUFFIX_LEN) {
+            // Unable to retrieve 2-digit suffix for IMEISV, so returns device IMEI.
+            return imei;
+        }
+        // Splices the first 14 digit of device IMEI with 2-digit SV suffix to form IMEISV.
+        return imei.substring(0, imei.length() - 1) + imeisv_suffix;
+    }
+
     private IkeSessionParams buildIkeSessionParams(
             TunnelSetupRequest setupRequest, String apnName) {
         int hardTimeSeconds =
@@ -945,13 +1000,27 @@ public class EpdgTunnelManager {
             }
         }
 
+        Ike3gppParams.Builder builder3gppParams = null;
+
+        String imei = getMobileDeviceIdentity();
+        if (imei != null) {
+            if (builder3gppParams == null) {
+                builder3gppParams = new Ike3gppParams.Builder();
+            }
+            Log.d(TAG, "DEVICE_IDENTITY set in Ike3gppParams");
+            builder3gppParams.setMobileDeviceIdentity(imei);
+        }
+
         if (setupRequest.pduSessionId() != 0) {
-            Ike3gppParams extParams =
-                    new Ike3gppParams.Builder()
-                            .setPduSessionId((byte) setupRequest.pduSessionId())
-                            .build();
+            if (builder3gppParams == null) {
+                builder3gppParams = new Ike3gppParams.Builder();
+            }
+            builder3gppParams.setPduSessionId((byte) setupRequest.pduSessionId());
+        }
+
+        if (builder3gppParams != null) {
             Ike3gppExtension extension =
-                    new Ike3gppExtension(extParams, new TmIke3gppCallback(apnName));
+                    new Ike3gppExtension(builder3gppParams.build(), new TmIke3gppCallback(apnName));
             builder.setIke3gppExtension(extension);
         }
 
@@ -1135,7 +1204,13 @@ public class EpdgTunnelManager {
     }
 
     private IkeIdentification getLocalIdentification() {
-        String nai = IwlanHelper.getNai(mContext, mSlotId);
+        String nai;
+
+        if (mNextReauthId != null) {
+            nai = new String(mNextReauthId, StandardCharsets.UTF_8);
+        } else {
+            nai = IwlanHelper.getNai(mContext, mSlotId);
+        }
 
         if (nai == null) {
             throw new IllegalArgumentException("Nai is null.");
@@ -1171,9 +1246,17 @@ public class EpdgTunnelManager {
             throw new IllegalArgumentException("Nai is null.");
         }
 
+        EapSessionConfig.EapAkaOption option = null;
+        if (mNextReauthId == null) {
+            Log.d(TAG, "getEapConfig: no next reauth ID");
+            option = null;
+        } else {
+            option = new EapSessionConfig.EapAkaOption.Builder().setReauthId(mNextReauthId).build();
+        }
+
         Log.d(TAG, "getEapConfig: Nai: " + nai);
         return new EapSessionConfig.Builder()
-                .setEapAkaConfig(subId, TelephonyManager.APPTYPE_USIM)
+                .setEapAkaConfig(subId, TelephonyManager.APPTYPE_USIM, option)
                 .setEapIdentity(nai.getBytes(StandardCharsets.US_ASCII))
                 .build();
     }
