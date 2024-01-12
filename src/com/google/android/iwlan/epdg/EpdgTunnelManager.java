@@ -940,13 +940,6 @@ public class EpdgTunnelManager {
                 epdgChildSaProposal.enableReorderingSaferProposals();
             }
 
-            if (IwlanCarrierConfig.getConfigBoolean(
-                    mContext,
-                    mSlotId,
-                    CarrierConfigManager.Iwlan.KEY_ADD_KE_TO_CHILD_SESSION_REKEY_BOOL)) {
-                epdgChildSaProposal.enableAddChildSessionRekeyKePayload();
-            }
-
             if (isChildSessionAeadAlgosAvailable()) {
                 childSessionParamsBuilder.addChildSaProposal(
                         epdgChildSaProposal.buildProposedChildSaAeadProposal());
