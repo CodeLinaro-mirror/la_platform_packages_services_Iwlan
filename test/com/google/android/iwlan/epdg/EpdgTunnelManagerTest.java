@@ -49,6 +49,7 @@ import android.net.IpSecTransform;
 import android.net.LinkAddress;
 import android.net.LinkProperties;
 import android.net.Network;
+import android.net.NetworkCapabilities;
 import android.net.ipsec.ike.ChildSessionCallback;
 import android.net.ipsec.ike.ChildSessionConfiguration;
 import android.net.ipsec.ike.ChildSessionParams;
@@ -85,7 +86,6 @@ import com.google.android.iwlan.flags.FeatureFlags;
 
 import org.junit.After;
 import org.junit.Before;
-import org.junit.Ignore;
 import org.junit.Rule;
 import org.junit.Test;
 import org.junit.runner.RunWith;
@@ -169,6 +169,7 @@ public class EpdgTunnelManagerTest {
     @Mock IpSecTransform mMockedIpSecTransformIn;
     @Mock IpSecTransform mMockedIpSecTransformOut;
     @Mock LinkProperties mMockLinkProperties;
+    @Mock NetworkCapabilities mMockNetworkCapabilities;
 
     static class IkeSessionArgumentCaptors {
         ArgumentCaptor<IkeSessionParams> mIkeSessionParamsCaptor =
@@ -194,6 +195,9 @@ public class EpdgTunnelManagerTest {
                 .thenReturn(mMockTelephonyManager);
         when(mMockContext.getSystemService(eq(IpSecManager.class))).thenReturn(mMockIpSecManager);
         when(mFakeFeatureFlags.epdgSelectionExcludeFailedIpAddress()).thenReturn(false);
+        when(mMockConnectivityManager.getNetworkCapabilities(any(Network.class)))
+                .thenReturn(mMockNetworkCapabilities);
+        when(mMockNetworkCapabilities.hasCapability(anyInt())).thenReturn(false);
 
         mEpdgTunnelManager =
                 spy(new EpdgTunnelManager(mMockContext, DEFAULT_SLOT_INDEX, mFakeFeatureFlags));
@@ -412,8 +416,9 @@ public class EpdgTunnelManagerTest {
     }
 
     @Test
-    @Ignore("b/239753287- Telus carrier errors out on parsing DEVICE_IDENTITY response")
     public void testBringUpTunnelSetsDeviceIdentityImeiSv() throws Exception {
+        IwlanCarrierConfig.putTestConfigBoolean(
+                IwlanCarrierConfig.KEY_IKE_DEVICE_IDENTITY_SUPPORTED_BOOL, true);
         when(mMockContext.getSystemService(eq(TelephonyManager.class)))
                 .thenReturn(mMockTelephonyManager);
         when(mMockTelephonyManager.createForSubscriptionId(DEFAULT_SUBID))
@@ -444,8 +449,9 @@ public class EpdgTunnelManagerTest {
     }
 
     @Test
-    @Ignore("b/239753287- Telus carrier errors out on parsing DEVICE_IDENTITY response")
     public void testBringUpTunnelSetsDeviceIdentityImei() throws Exception {
+        IwlanCarrierConfig.putTestConfigBoolean(
+                IwlanCarrierConfig.KEY_IKE_DEVICE_IDENTITY_SUPPORTED_BOOL, true);
         when(mMockContext.getSystemService(eq(TelephonyManager.class)))
                 .thenReturn(mMockTelephonyManager);
         when(mMockTelephonyManager.createForSubscriptionId(DEFAULT_SUBID))
@@ -474,8 +480,9 @@ public class EpdgTunnelManagerTest {
     }
 
     @Test
-    @Ignore("b/239753287- Telus carrier errors out on parsing DEVICE_IDENTITY response")
     public void testBringUpTunnelNoDeviceIdentityWhenImeiUnavailable() throws Exception {
+        IwlanCarrierConfig.putTestConfigBoolean(
+                IwlanCarrierConfig.KEY_IKE_DEVICE_IDENTITY_SUPPORTED_BOOL, true);
         when(mMockContext.getSystemService(eq(TelephonyManager.class)))
                 .thenReturn(mMockTelephonyManager);
         when(mMockTelephonyManager.createForSubscriptionId(DEFAULT_SUBID))
@@ -713,6 +720,8 @@ public class EpdgTunnelManagerTest {
         IwlanCarrierConfig.putTestConfigBoolean(
                 CarrierConfigManager.Iwlan.KEY_SUPPORTS_CHILD_SESSION_MULTIPLE_SA_PROPOSALS_BOOL,
                 true);
+        IwlanCarrierConfig.putTestConfigBoolean(
+                IwlanCarrierConfig.KEY_IKE_SA_TRANSFORMS_REORDER_BOOL, true);
 
         IkeSessionArgumentCaptors tunnelArgumentCaptors =
                 verifyBringUpTunnelWithDnsQuery(apnName, mMockDefaultNetwork);

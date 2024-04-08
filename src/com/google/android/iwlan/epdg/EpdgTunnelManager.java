@@ -32,6 +32,7 @@ import android.net.IpSecTransform;
 import android.net.LinkAddress;
 import android.net.LinkProperties;
 import android.net.Network;
+import android.net.NetworkCapabilities;
 import android.net.eap.EapAkaInfo;
 import android.net.eap.EapInfo;
 import android.net.eap.EapSessionConfig;
@@ -242,10 +243,6 @@ public class EpdgTunnelManager {
     }
 
     @VisibleForTesting protected EpdgMonitor mEpdgMonitor = new EpdgMonitor();
-
-    // TODO(b/239753287): Some networks request DEVICE_IDENTITY, but errors out when parsing
-    //  the response. Temporarily disabled.
-    private static final boolean INCLUDE_DEVICE_IDENTITY = false;
 
     public static final int BRINGDOWN_REASON_UNKNOWN = 0;
     public static final int BRINGDOWN_REASON_DISABLE_N1_MODE = 1;
@@ -1002,7 +999,11 @@ public class EpdgTunnelManager {
                                 .KEY_SUPPORTS_CHILD_SESSION_MULTIPLE_SA_PROPOSALS_BOOL)) {
             EpdgChildSaProposal epdgChildSaProposal = createEpdgChildSaProposal();
 
-            if (mFeatureFlags.highSecureTransformsPrioritized()) {
+            if (mFeatureFlags.highSecureTransformsPrioritized()
+                    && IwlanCarrierConfig.getConfigBoolean(
+                            mContext,
+                            mSlotId,
+                            IwlanCarrierConfig.KEY_IKE_SA_TRANSFORMS_REORDER_BOOL)) {
                 epdgChildSaProposal.enableReorderingSaferProposals();
             }
 
@@ -1180,7 +1181,11 @@ public class EpdgTunnelManager {
                                 .KEY_SUPPORTS_IKE_SESSION_MULTIPLE_SA_PROPOSALS_BOOL)) {
             EpdgIkeSaProposal epdgIkeSaProposal = createEpdgIkeSaProposal();
 
-            if (mFeatureFlags.highSecureTransformsPrioritized()) {
+            if (mFeatureFlags.highSecureTransformsPrioritized()
+                    && IwlanCarrierConfig.getConfigBoolean(
+                            mContext,
+                            mSlotId,
+                            IwlanCarrierConfig.KEY_IKE_SA_TRANSFORMS_REORDER_BOOL)) {
                 epdgIkeSaProposal.enableReorderingSaferProposals();
             }
 
@@ -1250,7 +1255,8 @@ public class EpdgTunnelManager {
             TunnelSetupRequest setupRequest, String apnName, int token) {
         Ike3gppParams.Builder builder3gppParams = new Ike3gppParams.Builder();
 
-        if (INCLUDE_DEVICE_IDENTITY) {
+        if (IwlanCarrierConfig.getConfigBoolean(
+                mContext, mSlotId, IwlanCarrierConfig.KEY_IKE_DEVICE_IDENTITY_SUPPORTED_BOOL)) {
             String imei = getMobileDeviceIdentity();
             if (imei != null) {
                 Log.d(TAG, "DEVICE_IDENTITY set in Ike3gppParams");
@@ -1800,6 +1806,8 @@ public class EpdgTunnelManager {
             TunnelConfig tunnelConfig;
             OnClosedMetrics.Builder onClosedMetricsBuilder;
             TunnelRequestWrapper tunnelRequestWrapper;
+            ConnectivityManager connectivityManager;
+            boolean isNetworkValidated;
             switch (msg.what) {
                 case EVENT_CHILD_SESSION_OPENED:
                 case EVENT_IKE_SESSION_CLOSED:
@@ -1893,6 +1901,11 @@ public class EpdgTunnelManager {
                     mIkeTunnelEstablishmentDuration =
                             System.currentTimeMillis() - mIkeTunnelEstablishmentStartTime;
                     mIkeTunnelEstablishmentStartTime = 0;
+                    connectivityManager = mContext.getSystemService(ConnectivityManager.class);
+                    isNetworkValidated =
+                            connectivityManager
+                                    .getNetworkCapabilities(mDefaultNetwork)
+                                    .hasCapability(NetworkCapabilities.NET_CAPABILITY_VALIDATED);
                     tunnelConfig
                             .getTunnelMetrics()
                             .onOpened(
@@ -1903,6 +1916,7 @@ public class EpdgTunnelManager {
                                                     (int) mEpdgServerSelectionDuration)
                                             .setIkeTunnelEstablishmentDuration(
                                                     (int) mIkeTunnelEstablishmentDuration)
+                                            .setIsNetworkValidated(isNetworkValidated)
                                             .build());
 
                     mEpdgMonitor.onApnConnectToEpdg(apnName, tunnelConfig.getEpdgAddress());
@@ -1980,11 +1994,18 @@ public class EpdgTunnelManager {
                                         : 0;
                         mIkeTunnelEstablishmentStartTime = 0;
 
+                        connectivityManager = mContext.getSystemService(ConnectivityManager.class);
+                        isNetworkValidated =
+                                connectivityManager
+                                        .getNetworkCapabilities(mDefaultNetwork)
+                                        .hasCapability(
+                                                NetworkCapabilities.NET_CAPABILITY_VALIDATED);
                         onClosedMetricsBuilder
                                 .setEpdgServerAddress(tunnelConfig.getEpdgAddress())
                                 .setEpdgServerSelectionDuration((int) mEpdgServerSelectionDuration)
                                 .setIkeTunnelEstablishmentDuration(
-                                        (int) mIkeTunnelEstablishmentDuration);
+                                        (int) mIkeTunnelEstablishmentDuration)
+                                .setIsNetworkValidated(isNetworkValidated);
                         tunnelConfig.getTunnelMetrics().onClosed(onClosedMetricsBuilder.build());
                     }
 
@@ -2174,8 +2195,7 @@ public class EpdgTunnelManager {
                             ikeSessionConnectionInfoData.mIkeSessionConnectionInfo.getNetwork();
                     apnName = ikeSessionConnectionInfoData.mApnName;
 
-                    ConnectivityManager connectivityManager =
-                            mContext.getSystemService(ConnectivityManager.class);
+                    connectivityManager = mContext.getSystemService(ConnectivityManager.class);
                     if (Objects.requireNonNull(connectivityManager).getLinkProperties(network)
                             == null) {
                         Log.e(TAG, "Network " + network + " has null LinkProperties!");
