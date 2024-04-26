@@ -56,7 +56,16 @@ import java.net.Inet4Address;
 import java.net.Inet6Address;
 import java.net.InetAddress;
 import java.net.UnknownHostException;
-import java.util.*;
+import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.Comparator;
+import java.util.HashSet;
+import java.util.LinkedHashMap;
+import java.util.LinkedHashSet;
+import java.util.List;
+import java.util.Map;
+import java.util.Objects;
+import java.util.Set;
 import java.util.concurrent.ArrayBlockingQueue;
 import java.util.concurrent.BlockingQueue;
 import java.util.concurrent.CompletableFuture;
@@ -534,7 +543,7 @@ public class EpdgSelector {
                 Log.e(TAG, "Cause of ExecutionException: ", e.getCause());
             } catch (InterruptedException e) {
                 Thread thread = Thread.currentThread();
-                if (thread.interrupted()) {
+                if (Thread.interrupted()) {
                     thread.interrupt();
                 }
                 Log.e(TAG, "InterruptedException: ", e);
@@ -1227,7 +1236,7 @@ public class EpdgSelector {
             Log.e(TAG, "Cause of ExecutionException: ", e.getCause());
         } catch (InterruptedException e) {
             Thread thread = Thread.currentThread();
-            if (thread.interrupted()) {
+            if (Thread.interrupted()) {
                 thread.interrupt();
             }
             Log.e(TAG, "InterruptedException: ", e);
