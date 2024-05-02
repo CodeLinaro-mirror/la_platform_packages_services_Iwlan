@@ -973,10 +973,10 @@ public class EpdgTunnelManager {
                 softTimeSeconds = CHILD_HARD_LIFETIME_SEC_MAXIMUM - LIFETIME_MARGIN_SEC_MINIMUM;
             } else {
                 hardTimeSeconds =
-                        IwlanHelper.getDefaultConfig(
+                        IwlanCarrierConfig.getDefaultConfigInt(
                                 CarrierConfigManager.Iwlan.KEY_CHILD_SA_REKEY_HARD_TIMER_SEC_INT);
                 softTimeSeconds =
-                        IwlanHelper.getDefaultConfig(
+                        IwlanCarrierConfig.getDefaultConfigInt(
                                 CarrierConfigManager.Iwlan.KEY_CHILD_SA_REKEY_SOFT_TIMER_SEC_INT);
             }
             Log.d(
@@ -1141,10 +1141,10 @@ public class EpdgTunnelManager {
                 softTimeSeconds = IKE_HARD_LIFETIME_SEC_MAXIMUM - LIFETIME_MARGIN_SEC_MINIMUM;
             } else {
                 hardTimeSeconds =
-                        IwlanHelper.getDefaultConfig(
+                        IwlanCarrierConfig.getDefaultConfigInt(
                                 CarrierConfigManager.Iwlan.KEY_IKE_REKEY_HARD_TIMER_SEC_INT);
                 softTimeSeconds =
-                        IwlanHelper.getDefaultConfig(
+                        IwlanCarrierConfig.getDefaultConfigInt(
                                 CarrierConfigManager.Iwlan.KEY_IKE_REKEY_SOFT_TIMER_SEC_INT);
             }
             Log.d(
@@ -1241,9 +1241,9 @@ public class EpdgTunnelManager {
                         CarrierConfigManager.Iwlan.KEY_NATT_KEEP_ALIVE_TIMER_SEC_INT);
         if (nattKeepAliveTimer < NATT_KEEPALIVE_DELAY_SEC_MIN
                 || nattKeepAliveTimer > NATT_KEEPALIVE_DELAY_SEC_MAX) {
-            Log.d(TAG, "Falling back to default natt keep alive timer");
+            Log.d(TAG, "Falling back to default natt keep alive timer" + nattKeepAliveTimer);
             nattKeepAliveTimer =
-                    IwlanHelper.getDefaultConfig(
+                    IwlanCarrierConfig.getDefaultConfigInt(
                             CarrierConfigManager.Iwlan.KEY_NATT_KEEP_ALIVE_TIMER_SEC_INT);
         }
         builder.setNattKeepAliveDelaySeconds(nattKeepAliveTimer);
@@ -1807,6 +1807,7 @@ public class EpdgTunnelManager {
             OnClosedMetrics.Builder onClosedMetricsBuilder;
             TunnelRequestWrapper tunnelRequestWrapper;
             ConnectivityManager connectivityManager;
+            NetworkCapabilities networkCapabilities;
             boolean isNetworkValidated;
             switch (msg.what) {
                 case EVENT_CHILD_SESSION_OPENED:
@@ -1902,10 +1903,12 @@ public class EpdgTunnelManager {
                             System.currentTimeMillis() - mIkeTunnelEstablishmentStartTime;
                     mIkeTunnelEstablishmentStartTime = 0;
                     connectivityManager = mContext.getSystemService(ConnectivityManager.class);
+                    networkCapabilities =
+                            connectivityManager.getNetworkCapabilities(mIkeSessionNetwork);
                     isNetworkValidated =
-                            connectivityManager
-                                    .getNetworkCapabilities(mDefaultNetwork)
-                                    .hasCapability(NetworkCapabilities.NET_CAPABILITY_VALIDATED);
+                            (networkCapabilities != null)
+                                    && networkCapabilities.hasCapability(
+                                            NetworkCapabilities.NET_CAPABILITY_VALIDATED);
                     tunnelConfig
                             .getTunnelMetrics()
                             .onOpened(
@@ -1995,10 +1998,11 @@ public class EpdgTunnelManager {
                         mIkeTunnelEstablishmentStartTime = 0;
 
                         connectivityManager = mContext.getSystemService(ConnectivityManager.class);
+                        networkCapabilities =
+                                connectivityManager.getNetworkCapabilities(mIkeSessionNetwork);
                         isNetworkValidated =
-                                connectivityManager
-                                        .getNetworkCapabilities(mDefaultNetwork)
-                                        .hasCapability(
+                                (networkCapabilities != null)
+                                        && networkCapabilities.hasCapability(
                                                 NetworkCapabilities.NET_CAPABILITY_VALIDATED);
                         onClosedMetricsBuilder
                                 .setEpdgServerAddress(tunnelConfig.getEpdgAddress())
@@ -2804,7 +2808,7 @@ public class EpdgTunnelManager {
         }
         if (!isValid) {
             timeList =
-                    IwlanHelper.getDefaultConfig(
+                    IwlanCarrierConfig.getDefaultConfigIntArray(
                             CarrierConfigManager.Iwlan.KEY_RETRANSMIT_TIMER_MSEC_INT_ARRAY);
         }
         Log.d(TAG, "getRetransmissionTimeoutsFromConfig: " + Arrays.toString(timeList));
@@ -2817,7 +2821,8 @@ public class EpdgTunnelManager {
                         mContext, mSlotId, CarrierConfigManager.Iwlan.KEY_DPD_TIMER_SEC_INT);
         if (dpdDelay < IKE_DPD_DELAY_SEC_MIN || dpdDelay > IKE_DPD_DELAY_SEC_MAX) {
             dpdDelay =
-                    IwlanHelper.getDefaultConfig(CarrierConfigManager.Iwlan.KEY_DPD_TIMER_SEC_INT);
+                    IwlanCarrierConfig.getDefaultConfigInt(
+                            CarrierConfigManager.Iwlan.KEY_DPD_TIMER_SEC_INT);
         }
         return dpdDelay;
     }

@@ -739,7 +739,6 @@ public class IwlanDataService extends DataService {
                     .setPcscfAddresses(tunnelLinkProperties.pcscfAddresses())
                     .setInterfaceName(tunnelLinkProperties.ifaceName())
                     .setGatewayAddresses(gatewayList)
-                    .setMtu(tunnelState.getLinkMtu())
                     .setMtuV4(tunnelState.getLinkMtu())
                     .setMtuV6(tunnelState.getLinkMtu())
                     .setPduSessionId(tunnelState.getPduSessionId())
@@ -1479,13 +1478,9 @@ public class IwlanDataService extends DataService {
                         // Record setup result for the Metrics
                         metricsAtom.setSetupRequestResult(DataServiceCallback.RESULT_SUCCESS);
                         metricsAtom.setIwlanError(iwlanError.getErrorType());
-
                         metricsAtom.setIwlanErrorWrappedClassnameAndStack(iwlanError);
-
-                        metricsAtom.setTunnelState(tunnelState.getState());
                         metricsAtom.setMessageId(
                                 IwlanStatsLog.IWLAN_SETUP_DATA_CALL_RESULT_REPORTED);
-
                         metricsAtom.setErrorCountOfSameCause(
                                 ErrorPolicyManager.getInstance(
                                                 mContext, iwlanDataServiceProvider.getSlotIndex())
@@ -1783,7 +1778,7 @@ public class IwlanDataService extends DataService {
                                     .setIsEmergency(isEmergency);
 
                     if (reason == DataService.REQUEST_REASON_HANDOVER) {
-                        // for now assume that, at max,  only one address of eachtype (v4/v6).
+                        // for now assume that, at max,  only one address of each type (v4/v6).
                         // TODO: Check if multiple ips can be sent in ike tunnel setup
                         for (LinkAddress lAddr : linkProperties.getLinkAddresses()) {
                             if (lAddr.isIpv4()) {
@@ -1876,11 +1871,9 @@ public class IwlanDataService extends DataService {
 
                     // Record setup result for the Metrics
                     metricsAtom = iwlanDataServiceProvider.mMetricsAtomForApn.get(apnName);
-                    tunnelState = iwlanDataServiceProvider.mTunnelStateForApn.get(apnName);
                     metricsAtom.setSetupRequestResult(DataServiceCallback.RESULT_SUCCESS);
                     metricsAtom.setIwlanError(IwlanError.NO_ERROR);
                     metricsAtom.setDataCallFailCause(DataFailCause.NONE);
-                    metricsAtom.setTunnelState(tunnelState.getState());
                     metricsAtom.setHandoverFailureMode(-1);
                     metricsAtom.setRetryDurationMillis(0);
                     metricsAtom.setMessageId(IwlanStatsLog.IWLAN_SETUP_DATA_CALL_RESULT_REPORTED);
@@ -1893,10 +1886,10 @@ public class IwlanDataService extends DataService {
                             openedMetricsData.getEpdgServerSelectionDuration());
                     metricsAtom.setIkeTunnelEstablishmentDurationMillis(
                             openedMetricsData.getIkeTunnelEstablishmentDuration());
-                    metricsAtom.setIsNetworkValidated(openedMetricsData.getIsNetworkValidated());
+                    metricsAtom.setIsNetworkValidated(openedMetricsData.isNetworkValidated());
 
                     metricsAtom.sendMetricsData();
-                    metricsAtom.setMessageId(metricsAtom.INVALID_MESSAGE_ID);
+                    metricsAtom.setMessageId(MetricsAtom.INVALID_MESSAGE_ID);
                     break;
 
                 case EVENT_TUNNEL_CLOSED_METRICS:
@@ -1920,10 +1913,10 @@ public class IwlanDataService extends DataService {
                             closedMetricsData.getEpdgServerSelectionDuration());
                     metricsAtom.setIkeTunnelEstablishmentDurationMillis(
                             closedMetricsData.getIkeTunnelEstablishmentDuration());
-                    metricsAtom.setIsNetworkValidated(closedMetricsData.getIsNetworkValidated());
+                    metricsAtom.setIsNetworkValidated(closedMetricsData.isNetworkValidated());
 
                     metricsAtom.sendMetricsData();
-                    metricsAtom.setMessageId(metricsAtom.INVALID_MESSAGE_ID);
+                    metricsAtom.setMessageId(MetricsAtom.INVALID_MESSAGE_ID);
                     iwlanDataServiceProvider.mMetricsAtomForApn.remove(apnName);
                     break;
 
@@ -2408,11 +2401,6 @@ public class IwlanDataService extends DataService {
     @VisibleForTesting
     void setAppContext(Context appContext) {
         mContext = appContext;
-    }
-
-    @VisibleForTesting
-    IwlanNetworkMonitorCallback getNetworkMonitorCallback() {
-        return mNetworkMonitorCallback;
     }
 
     @VisibleForTesting
