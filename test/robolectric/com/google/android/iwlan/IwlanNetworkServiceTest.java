@@ -35,7 +35,6 @@ import android.net.Network;
 import android.net.NetworkCapabilities;
 import android.net.TelephonyNetworkSpecifier;
 import android.net.vcn.VcnTransportInfo;
-import android.net.vcn.VcnUtils;
 import android.os.Handler;
 import android.os.IBinder;
 import android.os.Looper;
@@ -61,8 +60,6 @@ import org.robolectric.RobolectricTestRunner;
 import org.robolectric.Shadows;
 import org.robolectric.android.controller.ServiceController;
 import org.robolectric.annotation.Config;
-import org.robolectric.annotation.Implementation;
-import org.robolectric.annotation.Implements;
 import org.robolectric.shadows.ShadowConnectivityManager;
 import org.robolectric.shadows.ShadowLooper;
 import org.robolectric.shadows.ShadowNetwork;
@@ -71,12 +68,7 @@ import org.robolectric.shadows.ShadowSubscriptionManager;
 import java.util.List;
 
 @RunWith(RobolectricTestRunner.class)
-@Config(
-        shadows = {
-            IwlanNetworkServiceTest.ShadowIwlanEventListener.class,
-            IwlanNetworkServiceTest.ShadowIwlanHelper.class,
-            IwlanNetworkServiceTest.ShadowVcnUtils.class
-        })
+@Config(shadows = {ShadowIwlanEventListener.class, ShadowIwlanHelper.class, ShadowVcnUtils.class})
 public class IwlanNetworkServiceTest {
     private static final int DEFAULT_SLOT_INDEX = 0;
     private static final int DEFAULT_SUB_ID = 1;
@@ -179,7 +171,7 @@ public class IwlanNetworkServiceTest {
                         mIwlanNetworkService.onCreateNetworkServiceProvider(DEFAULT_SLOT_INDEX);
         ShadowLooper.idleMainLooper();
 
-        simulateWifiConnected();
+        simulateNetworkConnected(ShadowNetwork.newInstance(100), getWifiNetworkCapabilities());
         simulateSubscriptionActive(DEFAULT_SLOT_INDEX, provider);
 
         provider.requestNetworkRegistrationInfo(
@@ -216,7 +208,8 @@ public class IwlanNetworkServiceTest {
                         mIwlanNetworkService.onCreateNetworkServiceProvider(DEFAULT_SLOT_INDEX);
         ShadowLooper.idleMainLooper();
 
-        simulateCellularConnected(DEFAULT_SUB_ID);
+        simulateNetworkConnected(
+                ShadowNetwork.newInstance(101), getCellularNetworkCapabilities(DEFAULT_SUB_ID));
         simulateSubscriptionActive(DEFAULT_SLOT_INDEX, provider);
 
         provider.requestNetworkRegistrationInfo(
@@ -238,7 +231,8 @@ public class IwlanNetworkServiceTest {
         ShadowLooper.idleMainLooper();
 
         ShadowIwlanHelper.setCrossSimCallingEnabled(true);
-        simulateCellularConnected(OTHER_SUB_ID);
+        simulateNetworkConnected(
+                ShadowNetwork.newInstance(101), getCellularNetworkCapabilities(OTHER_SUB_ID));
         simulateSubscriptionActive(DEFAULT_SLOT_INDEX, provider);
 
         provider.requestNetworkRegistrationInfo(
@@ -260,7 +254,8 @@ public class IwlanNetworkServiceTest {
         ShadowLooper.idleMainLooper();
 
         ShadowIwlanHelper.setCrossSimCallingEnabled(false);
-        simulateCellularConnected(OTHER_SUB_ID);
+        simulateNetworkConnected(
+                ShadowNetwork.newInstance(101), getCellularNetworkCapabilities(OTHER_SUB_ID));
         simulateSubscriptionActive(DEFAULT_SLOT_INDEX, provider);
 
         provider.requestNetworkRegistrationInfo(
@@ -282,7 +277,8 @@ public class IwlanNetworkServiceTest {
         ShadowLooper.idleMainLooper();
 
         ShadowIwlanHelper.setCrossSimCallingEnabled(true);
-        simulateVcnConnected(OTHER_SUB_ID);
+        ShadowVcnUtils.setSubId(OTHER_SUB_ID);
+        simulateNetworkConnected(ShadowNetwork.newInstance(102), getVcnNetworkCapabilities());
         simulateSubscriptionActive(DEFAULT_SLOT_INDEX, provider);
 
         provider.requestNetworkRegistrationInfo(
@@ -309,7 +305,7 @@ public class IwlanNetworkServiceTest {
         mIwlanNetworkService.initCallback();
         mIwlanNetworkService.addIwlanNetworkServiceProvider(spyProvider);
 
-        simulateWifiConnected();
+        simulateNetworkConnected(ShadowNetwork.newInstance(100), getWifiNetworkCapabilities());
         verify(spyProvider, times(1)).notifyNetworkRegistrationInfoChanged();
 
         Network network = ShadowNetwork.newInstance(100);
@@ -338,10 +334,10 @@ public class IwlanNetworkServiceTest {
 
         ShadowIwlanHelper.setCrossSimCallingEnabled(true);
 
-        simulateCellularConnected(1);
+        simulateNetworkConnected(ShadowNetwork.newInstance(101), getCellularNetworkCapabilities(1));
         verify(spyProvider, times(1)).notifyNetworkRegistrationInfoChanged();
 
-        simulateCellularConnected(2);
+        simulateNetworkConnected(ShadowNetwork.newInstance(101), getCellularNetworkCapabilities(2));
         verify(spyProvider, times(2)).notifyNetworkRegistrationInfoChanged();
     }
 
@@ -407,52 +403,32 @@ public class IwlanNetworkServiceTest {
         verify(spyProvider, times(1)).notifyNetworkRegistrationInfoChanged();
     }
 
-    private void simulateWifiConnected() {
-        Network network = ShadowNetwork.newInstance(100);
-        NetworkCapabilities networkCapabilities =
-                new NetworkCapabilities.Builder().addTransportType(TRANSPORT_WIFI).build();
-        ShadowConnectivityManager shadowConnectivityManager =
-                Shadows.shadowOf(mConnectivityManager);
-        shadowConnectivityManager.setNetworkCapabilities(network, networkCapabilities);
-        for (ConnectivityManager.NetworkCallback callback :
-                shadowConnectivityManager.getNetworkCallbacks()) {
-            callback.onCapabilitiesChanged(network, networkCapabilities);
-        }
-        ShadowLooper.idleMainLooper();
+    private NetworkCapabilities getWifiNetworkCapabilities() {
+        return new NetworkCapabilities.Builder().addTransportType(TRANSPORT_WIFI).build();
     }
 
-    private void simulateCellularConnected(int subId) {
-        Network network = ShadowNetwork.newInstance(101);
-        NetworkCapabilities networkCapabilities =
-                new NetworkCapabilities.Builder()
-                        .addTransportType(TRANSPORT_CELLULAR)
-                        .setNetworkSpecifier(new TelephonyNetworkSpecifier(subId))
-                        .build();
-        ShadowConnectivityManager shadowConnectivityManager =
-                Shadows.shadowOf(mConnectivityManager);
-        shadowConnectivityManager.setNetworkCapabilities(network, networkCapabilities);
-        for (ConnectivityManager.NetworkCallback callback :
-                shadowConnectivityManager.getNetworkCallbacks()) {
-            callback.onCapabilitiesChanged(network, networkCapabilities);
-        }
-        ShadowLooper.idleMainLooper();
+    private NetworkCapabilities getCellularNetworkCapabilities(int subId) {
+        return new NetworkCapabilities.Builder()
+                .addTransportType(TRANSPORT_CELLULAR)
+                .setNetworkSpecifier(new TelephonyNetworkSpecifier(subId))
+                .build();
     }
 
-    private void simulateVcnConnected(int subId) {
-        Network network = ShadowNetwork.newInstance(102);
+    private NetworkCapabilities getVcnNetworkCapabilities() {
         VcnTransportInfo vcnInfo = new VcnTransportInfo.Builder().build();
-        NetworkCapabilities networkCapabilities =
-                new NetworkCapabilities.Builder()
-                        .addTransportType(TRANSPORT_CELLULAR)
-                        .setTransportInfo(vcnInfo)
-                        .build();
-        ShadowVcnUtils.setSubId(subId);
+        return new NetworkCapabilities.Builder()
+                .addTransportType(TRANSPORT_CELLULAR)
+                .setTransportInfo(vcnInfo)
+                .build();
+    }
+
+    private void simulateNetworkConnected(Network network, NetworkCapabilities nc) {
         ShadowConnectivityManager shadowConnectivityManager =
                 Shadows.shadowOf(mConnectivityManager);
-        shadowConnectivityManager.setNetworkCapabilities(network, networkCapabilities);
+        shadowConnectivityManager.setNetworkCapabilities(network, nc);
         for (ConnectivityManager.NetworkCallback callback :
                 shadowConnectivityManager.getNetworkCallbacks()) {
-            callback.onCapabilitiesChanged(network, networkCapabilities);
+            callback.onCapabilitiesChanged(network, nc);
         }
         ShadowLooper.idleMainLooper();
     }
@@ -491,71 +467,5 @@ public class IwlanNetworkServiceTest {
 
     private static void waitForHandlerAction(android.os.Handler handler) {
         Shadows.shadowOf(Looper.getMainLooper()).runToEndOfTasks();
-    }
-
-    @Implements(IwlanEventListener.class)
-    public static class ShadowIwlanEventListener {
-        private static IwlanEventListener sInstance;
-
-        @Implementation
-        public static IwlanEventListener getInstance(Context context, int slotId) {
-            return sInstance;
-        }
-
-        public static void setInstance(IwlanEventListener instance) {
-            sInstance = instance;
-        }
-
-        public static void reset() {
-            sInstance = null;
-        }
-    }
-
-    @Implements(IwlanHelper.class)
-    public static class ShadowIwlanHelper {
-        private static int sSubId;
-        private static boolean sIsCrossSimCallingEnabled;
-
-        @Implementation
-        public static int getSubId(Context context, int slotId) {
-            return sSubId;
-        }
-
-        @Implementation
-        public static boolean isCrossSimCallingEnabled(Context context, int slotId) {
-            return sIsCrossSimCallingEnabled;
-        }
-
-        public static void setSubId(int slotId, int subId) {
-            sSubId = subId;
-        }
-
-        public static void setCrossSimCallingEnabled(boolean enabled) {
-            sIsCrossSimCallingEnabled = enabled;
-        }
-
-        public static void reset() {
-            sSubId = 0;
-            sIsCrossSimCallingEnabled = false;
-        }
-    }
-
-    @Implements(VcnUtils.class)
-    public static class ShadowVcnUtils {
-        private static int sSubId;
-
-        @Implementation
-        public static int getSubIdFromVcnCaps(
-                ConnectivityManager connectivityManager, NetworkCapabilities networkCapabilities) {
-            return sSubId;
-        }
-
-        public static void setSubId(int subId) {
-            sSubId = subId;
-        }
-
-        public static void reset() {
-            sSubId = 0;
-        }
     }
 }
