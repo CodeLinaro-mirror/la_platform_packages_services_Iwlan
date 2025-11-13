@@ -45,8 +45,6 @@ import android.telephony.SubscriptionManager;
 import android.telephony.TelephonyManager;
 import android.util.Log;
 
-import com.android.internal.annotations.VisibleForTesting;
-
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
@@ -60,8 +58,7 @@ public class IwlanNetworkService extends NetworkService {
     private static final int EVENT_CREATE_NETWORK_SERVICE_PROVIDER = EVENT_BASE + 1;
     private static final int EVENT_REMOVE_NETWORK_SERVICE_PROVIDER = EVENT_BASE + 2;
 
-    @VisibleForTesting
-    enum Transport {
+    private enum Transport {
         UNSPECIFIED_NETWORK,
         MOBILE,
         WIFI
@@ -80,6 +77,21 @@ public class IwlanNetworkService extends NetworkService {
     // If internet is over WiFi, this value will be SubscriptionManager.INVALID_SUBSCRIPTION_ID.
     private int mConnectedDataSub = SubscriptionManager.INVALID_SUBSCRIPTION_ID;
     private Transport mDefaultDataTransport = Transport.UNSPECIFIED_NETWORK;
+
+    interface Dependencies {
+        Looper getLooper();
+    }
+
+    private class DefaultDependencies implements Dependencies {
+        @Override
+        public Looper getLooper() {
+            mIwlanNetworkServiceHandlerThread = new HandlerThread("IwlanNetworkServiceThread");
+            mIwlanNetworkServiceHandlerThread.start();
+            return mIwlanNetworkServiceHandlerThread.getLooper();
+        }
+    }
+
+    private Dependencies mDependencies = new DefaultDependencies();
 
     // This callback runs in the same thread as IwlanNetworkServiceHandler
     final class IwlanNetworkMonitorCallback extends ConnectivityManager.NetworkCallback {
@@ -169,7 +181,6 @@ public class IwlanNetworkService extends NetworkService {
         }
     }
 
-    @VisibleForTesting
     class IwlanNetworkServiceProvider extends NetworkServiceProvider {
         private final IwlanNetworkService mIwlanNetworkService;
         private final String SUB_TAG;
@@ -214,7 +225,6 @@ public class IwlanNetworkService extends NetworkService {
                     .removeEventListener(getIwlanNetworkServiceHandler());
         }
 
-        @VisibleForTesting
         void subscriptionChanged() {
             boolean subActive =
                     getSubscriptionManager()
@@ -247,7 +257,7 @@ public class IwlanNetworkService extends NetworkService {
             switch (msg.what) {
                 case IwlanEventListener.CROSS_SIM_CALLING_ENABLE_EVENT,
                         IwlanEventListener.CROSS_SIM_CALLING_DISABLE_EVENT -> {
-                    iwlanNetworkServiceProvider = getNetworkServiceProvider(msg.arg1);
+                    iwlanNetworkServiceProvider = mIwlanNetworkServiceProviders.get(msg.arg1);
                     iwlanNetworkServiceProvider.notifyNetworkRegistrationInfoChanged();
                 }
                 case EVENT_NETWORK_REGISTRATION_INFO_REQUEST -> {
@@ -446,7 +456,7 @@ public class IwlanNetworkService extends NetworkService {
         // register for default network callback
         mNetworkMonitorCallback = new IwlanNetworkMonitorCallback();
         getConnectivityManager()
-                .registerSystemDefaultNetworkCallback(
+                .registerDefaultNetworkCallback(
                         mNetworkMonitorCallback, getIwlanNetworkServiceHandler());
         Log.d(TAG, "Registered with Connectivity Service");
 
@@ -473,35 +483,16 @@ public class IwlanNetworkService extends NetworkService {
         mIwlanNetworkServiceHandler = null;
     }
 
-    @VisibleForTesting
-    void setAppContext(Context appContext) {
-        mContext = appContext;
+    void setDependencies(Dependencies dependencies) {
+        mDependencies = dependencies;
     }
 
-    @VisibleForTesting
-    IwlanNetworkServiceProvider getNetworkServiceProvider(int slotIndex) {
-        return mIwlanNetworkServiceProviders.get(slotIndex);
-    }
-
-    @VisibleForTesting
-    IwlanNetworkMonitorCallback getNetworkMonitorCallback() {
-        return mNetworkMonitorCallback;
-    }
-
-    @VisibleForTesting
     @NonNull
-    Handler getIwlanNetworkServiceHandler() {
+    private Handler getIwlanNetworkServiceHandler() {
         if (mIwlanNetworkServiceHandler == null) {
-            mIwlanNetworkServiceHandler = new IwlanNetworkServiceHandler(getLooper());
+            mIwlanNetworkServiceHandler = new IwlanNetworkServiceHandler(mDependencies.getLooper());
         }
         return mIwlanNetworkServiceHandler;
-    }
-
-    @VisibleForTesting
-    Looper getLooper() {
-        mIwlanNetworkServiceHandlerThread = new HandlerThread("IwlanNetworkServiceThread");
-        mIwlanNetworkServiceHandlerThread.start();
-        return mIwlanNetworkServiceHandlerThread.getLooper();
     }
 
     private static String eventToString(int event) {
