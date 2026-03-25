@@ -1111,8 +1111,6 @@ public class IwlanDataService extends DataService {
                     isActiveDataOnOtherSub(getSlotIndex()),
                     IwlanHelper.isCrossSimCallingEnabled(mContext, getSlotIndex()))) {
                 mEpdgTunnelManager.updateNetwork(network, linkProperties);
-            } else {
-                mEpdgTunnelManager.updateNetwork(null, null);
             }
 
             if (Objects.equals(network, sNetwork)) {
@@ -1663,7 +1661,6 @@ public class IwlanDataService extends DataService {
                 // so as to not affect an ongoing handover
                 // only force close tunnels in bring down state
                 dp.forceCloseTunnelsInDeactivatingState();
-                dp.updateNetwork(null, null);
             }
         }
         sNetwork = network;
